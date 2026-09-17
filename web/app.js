@@ -35,6 +35,7 @@ const state = reactive({
   fixed: { head: '', tail: '', middle: '', bgm: '' },
   toolbox: { running: false, stage: 'idle', tool: '', current: 0, total: 0, current_file: '', results: [], cancel: false, out_dir: '', error: null },
   toolboxAsr: { running: false, stage: 'idle', folder: '', model: 'small', current: 0, total: 0, current_file: '', done: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, index_stats: null, models_cached: {}, last_status: '' },
+  toolboxSub: { running: false, stage: 'idle', mode: 'folder', style: 'minimal', folder: '', video: '', sub_file: '', out_dir: '', current: 0, total: 0, current_file: '', ok: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, last_status: '' },
   toolboxUI: {
     tab: 'media',           // media/asr/subtitle/cut/match
     folder: '',             // 输入文件夹
@@ -796,6 +797,82 @@ const asrModelText = computed(() => {
   return parts.length ? parts.join(' + ') : '—';
 });
 
+/* ---------- 工具箱：字幕包装 ---------- */
+async function subSelectMain() {
+  if (state.selectBusy) return;
+  state.selectBusy = true;
+  try {
+    if (state.toolboxSub.mode === 'folder') {
+      const data = await api('/api/select_folder?name=toolbox_sub_folder');
+      if (data.busy) { showMsg('文件夹选择窗口已打开', 'info'); return; }
+      if (data.path) state.toolboxSub.folder = data.path;
+    } else {
+      const data = await api('/api/select_toolbox_file?kind=video');
+      if (data.busy) { showMsg('文件选择窗口已打开', 'info'); return; }
+      if (data.path) state.toolboxSub.video = data.path;
+    }
+  } catch (e) { showMsg('选择失败：' + e.message, 'error'); }
+  finally { state.selectBusy = false; }
+}
+
+async function subSelectFile() {
+  if (state.selectBusy) return;
+  state.selectBusy = true;
+  try {
+    const data = await api('/api/select_toolbox_file?kind=sub');
+    if (data.busy) { showMsg('文件选择窗口已打开', 'info'); return; }
+    if (data.path) state.toolboxSub.sub_file = data.path;
+  } catch (e) { showMsg('选择失败：' + e.message, 'error'); }
+  finally { state.selectBusy = false; }
+}
+
+async function subSelectOut() {
+  if (state.selectBusy) return;
+  state.selectBusy = true;
+  try {
+    const data = await api('/api/select_folder?name=toolbox_sub_out');
+    if (data.busy) { showMsg('文件夹选择窗口已打开', 'info'); return; }
+    if (data.path) state.toolboxSub.out_dir = data.path;
+  } catch (e) { showMsg('选择失败：' + e.message, 'error'); }
+  finally { state.selectBusy = false; }
+}
+
+async function subRun() {
+  if (state.toolboxSub.running) return;
+  let body;
+  if (state.toolboxSub.mode === 'folder') {
+    if (!state.toolboxSub.folder) { showMsg('请先选择素材文件夹', 'error'); return; }
+    body = { folder: state.toolboxSub.folder, style: state.toolboxSub.style, out_dir: state.toolboxSub.out_dir };
+    const r = await api('/api/toolbox/sub/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r || !r.ok) { showMsg((r && r.error) || '启动失败', 'error'); return; }
+    if (!state.toolboxSub.out_dir && r.out_dir) state.toolboxSub.out_dir = r.out_dir;
+  } else {
+    if (!state.toolboxSub.video) { showMsg('请先选择视频文件', 'error'); return; }
+    body = { video: state.toolboxSub.video, sub_file: state.toolboxSub.sub_file, style: state.toolboxSub.style, out_dir: state.toolboxSub.out_dir };
+    const r = await api('/api/toolbox/sub/run_file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r || !r.ok) { showMsg((r && r.error) || '启动失败', 'error'); return; }
+    if (!state.toolboxSub.out_dir && r.out_dir) state.toolboxSub.out_dir = r.out_dir;
+  }
+  showMsg('字幕烧录任务已启动', 'info');
+}
+
+async function subCancel() {
+  if (!state.toolboxSub.running) return;
+  await api('/api/toolbox/sub/cancel', {});
+  showMsg('已请求取消（已完成部分已保存）', 'info');
+}
+
+function subOpenOut() {
+  if (state.toolboxSub.out_dir) api('/api/open_folder', { folder: state.toolboxSub.out_dir });
+}
+
+const subProgress = computed(() => {
+  const total = state.toolboxSub.total || 0;
+  if (!total) return 0;
+  const pct = Math.round(((state.toolboxSub.current || 0) / total) * 100);
+  return Math.max(0, Math.min(100, pct));
+});
+
 /* ---------- 水印选择（服务端文件对话框，直接引用本地文件，不拷贝） ---------- */
 
 async function pickWatermark(e) {
@@ -1125,6 +1202,7 @@ async function poll() {
       state.toolboxAsr.index_stats = s.toolbox_asr.index_stats || null;
       state.toolboxAsr.models_cached = s.toolbox_asr.models_cached || {};
     }
+    if (s.toolbox_sub) state.toolboxSub = { ...state.toolboxSub, ...s.toolbox_sub };
     // 更新下载状态
     if (s.update_download) {
       const wasReady = state.updateDownload && state.updateDownload.stage === 'ready';
@@ -1352,6 +1430,7 @@ createApp({
       scan, toggleFixed, fileName, shortError, fmtEta, makeDownloadUrl,
       toolboxSelect, toolboxRun, toolboxCancel, toolboxClear, toolboxOpenOut,
       asrRun, asrCancel, asrClear, asrProgress, asrStats, asrDurationText, asrModelText,
+      subSelectMain, subSelectFile, subSelectOut, subRun, subCancel, subOpenOut, subProgress,
       matVol, setMatVol,
       selectPoolFolder, addMiddlePool, removeMiddlePool, scanPool,
       togglePoolItem, poolOrder, togglePoolExpand,

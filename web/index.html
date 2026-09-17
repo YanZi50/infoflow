@@ -1173,8 +1173,97 @@
               </div>
             </div>
 
+            <!-- 字幕包装 -->
+            <div v-show="toolboxUI.tab==='subtitle'" class="card glass">
+              <div class="card-title"><span class="bar"></span>字幕包装
+                <span class="card-hint" style="font-weight:400">样式模板 → 烧录到视频（支持①识别字幕 / 外部 SRT·ASS）</span>
+              </div>
+
+              <div class="form-grid">
+                <div class="field">
+                  <div class="field-label">处理方式</div>
+                  <select class="input" v-model="toolboxSub.mode">
+                    <option value="folder">批量：文件夹 + ①识别索引字幕</option>
+                    <option value="file">单文件：视频 + 外部字幕文件</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <div class="field-label">字幕样式</div>
+                  <select class="input" v-model="toolboxSub.style">
+                    <option value="minimal">极简 · 白字细描边（推荐）</option>
+                    <option value="outline">描边黄 · 粗黑边黄字</option>
+                    <option value="bubble">气泡条 · 半透明背景盒</option>
+                    <option value="danmaku">弹幕 · 顶部横向滚动</option>
+                  </select>
+                </div>
+
+                <div class="field" style="grid-column:1/-1">
+                  <div class="field-label">
+                    <template v-if="toolboxSub.mode==='folder'">素材文件夹（视频需先建立①识别索引）</template>
+                    <template v-else>视频文件</template>
+                  </div>
+                  <div class="folder-row">
+                    <input class="input input-path" placeholder="选择路径"
+                           :value="toolboxSub.mode==='folder' ? toolboxSub.folder : toolboxSub.video"
+                           @input="toolboxSub.mode==='folder' ? (toolboxSub.folder = $event.target.value) : (toolboxSub.video = $event.target.value)">
+                    <button class="btn plain" @click="subSelectMain" :disabled="selectBusy">选择</button>
+                  </div>
+                </div>
+                <div class="field" style="grid-column:1/-1" v-if="toolboxSub.mode==='file'">
+                  <div class="field-label">字幕文件（SRT / ASS；不填则用①识别索引）</div>
+                  <div class="folder-row">
+                    <input class="input input-path" placeholder="选择字幕文件（可选）" v-model="toolboxSub.sub_file">
+                    <button class="btn plain" @click="subSelectFile" :disabled="selectBusy">选择</button>
+                  </div>
+                </div>
+                <div class="field" style="grid-column:1/-1">
+                  <div class="field-label">输出目录（留空默认：程序目录/toolbox_export/字幕包装）</div>
+                  <div class="folder-row">
+                    <input class="input input-path" placeholder="选择输出目录（可选）" v-model="toolboxSub.out_dir">
+                    <button class="btn plain" @click="subSelectOut" :disabled="selectBusy">选择</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="btn-row" style="margin-top:14px">
+                <button class="btn" @click="subRun" :disabled="toolboxSub.running">开始烧录</button>
+                <button v-if="toolboxSub.running" class="btn plain" @click="subCancel">取消</button>
+                <button class="btn plain" @click="subOpenOut" :disabled="!toolboxSub.out_dir">打开输出目录</button>
+              </div>
+
+              <!-- 进度 -->
+              <div v-if="toolboxSub.total > 0 || toolboxSub.running" style="margin-top:14px">
+                <div class="progress-wrap">
+                  <div class="progress-inner" :style="{width: subProgress + '%'}"></div>
+                </div>
+                <div class="progress-info">
+                  <span v-if="toolboxSub.running && toolboxSub.mode==='file'">正在烧录…</span>
+                  <span v-else-if="toolboxSub.running">
+                    烧录中 {{ toolboxSub.current }}/{{ toolboxSub.total }} · {{ toolboxSub.current_file }}
+                    · 成功 {{ toolboxSub.ok }} / 跳过 {{ toolboxSub.skipped }} / 失败 {{ toolboxSub.failed }}
+                  </span>
+                  <span v-else-if="toolboxSub.stage==='done'">完成：成功 {{ toolboxSub.ok }} · 跳过(无字幕/无声) {{ toolboxSub.skipped }} · 失败 {{ toolboxSub.failed }}</span>
+                  <span v-else-if="toolboxSub.stage==='cancelled'">已取消（已完成的部分已保存）</span>
+                  <span v-else-if="toolboxSub.stage==='error'">出错：{{ toolboxSub.error }}</span>
+                </div>
+              </div>
+
+              <!-- 失败项 -->
+              <div v-if="toolboxSub.errors.length" class="result-list" style="margin-top:12px">
+                <div class="result-item fail" v-for="(e, i) in toolboxSub.errors" :key="i">
+                  <span class="badge fail">失败</span>
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ e.name }}</span>
+                  <span class="card-hint" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ e.error }}</span>
+                </div>
+              </div>
+
+              <div class="card-hint" style="margin-top:12px">
+                提示：批量模式依赖①「语音识别与索引」产出的句时间轴；未索引或无声的素材会标记失败/跳过，不影响其他视频。
+              </div>
+            </div>
+
             <!-- 其他工具：建设中 -->
-            <div v-show="toolboxUI.tab==='subtitle' || toolboxUI.tab==='cut' || toolboxUI.tab==='match'" class="card glass">
+            <div v-show="toolboxUI.tab==='cut' || toolboxUI.tab==='match'" class="card glass">
               <div class="card-title"><span class="bar"></span>{{ toolboxTabName }}
                 <span class="card-hint" style="font-weight:400">建设中</span>
               </div>

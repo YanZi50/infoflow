@@ -123,7 +123,7 @@ def _unique_dst(folder: str, stem: str, suffix: str) -> str:
 
 
 def _run(args: list[str], cancel: Optional[Callable[[], bool]] = None,
-         timeout: float = 3600.0) -> str:
+         timeout: float = 3600.0, cwd: Optional[str] = None) -> str:
     """执行 ffmpeg（list 参数，无 shell）。返回 stderr 文本；失败抛 MediaError。
 
     注意：stderr 写临时文件而非 PIPE——ffmpeg 进度输出量大，PIPE 不持续读会填满缓冲阻塞进程。
@@ -135,7 +135,7 @@ def _run(args: list[str], cancel: Optional[Callable[[], bool]] = None,
         with open(err_path, "wb") as err_fh:
             proc = subprocess.Popen(
                 args, stdout=subprocess.DEVNULL, stderr=err_fh,
-                creationflags=flags,
+                creationflags=flags, cwd=cwd,
             )
             start = time.time()
             try:
@@ -189,6 +189,18 @@ def _resolve_resolution(res: str, src_path: str) -> str:
     if res in presets:
         return presets[res]
     raise MediaError(f"无法识别的分辨率：{res}（示例：1080x1920）")
+
+
+def run_ffmpeg(args: list[str], cancel: Optional[Callable[[], bool]] = None,
+               timeout: float = 3600.0, cwd: Optional[str] = None) -> str:
+    """通用 ffmpeg 执行入口（list 参数、无 shell、防注入）。
+
+    供工具箱其他模块（字幕烧录/剪气口等）复用；禁止在 engine.py 之外裸调 subprocess。
+    """
+    ff = ffmpeg_path()
+    if not os.path.isfile(ff):
+        raise MediaError("未找到 FFmpeg，无法处理")
+    return _run([ff] + args, cancel, timeout, cwd=cwd)
 
 
 def run_tool(tool: str, src: str, dst: str, params: dict,

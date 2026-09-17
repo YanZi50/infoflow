@@ -21,6 +21,7 @@ import zipfile
 import base64
 import urllib.request
 from dataclasses import asdict
+from typing import Optional
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
@@ -230,6 +231,23 @@ class AppState:
             "out_dir": "",
             "error": None,
         }
+        # 工具箱-字幕包装任务状态
+        self.toolbox_sub: dict = {
+            "running": False,
+            "stage": "idle",          # idle/running/done/cancelled/error
+            "mode": "",               # folder / file
+            "style": "minimal",
+            "current": 0,
+            "total": 0,
+            "current_file": "",
+            "ok": 0,
+            "skipped": 0,
+            "failed": 0,
+            "errors": [],             # [{name, error}]
+            "cancel": False,
+            "out_dir": "",
+            "error": None,
+        }
         # 工具箱-语音识别与索引任务状态
         self.toolbox_asr: dict = {
             "running": False,
@@ -319,6 +337,7 @@ class AppState:
                 "update_download": self.update_download,
                 "toolbox": dict(self.toolbox),
                 "toolbox_asr": dict(self.toolbox_asr),
+                "toolbox_sub": dict(self.toolbox_sub),
                 "portable": bool(getattr(sys, "frozen", False)),
                 "failed_items": self.result.failed_items if self.result else [],
                 "success_items": _with_sizes(self.result.success_items) if self.result else [],
@@ -455,6 +474,46 @@ def _toolbox_worker(tool: str, files: list[str], params: dict, out_dir: str) -> 
         STATE.toolbox["stage"] = "error"
     finally:
         STATE.toolbox["running"] = False
+
+
+def _toolbox_sub_worker(target: str, style: str, out_dir: str,
+                        sub_file: Optional[str]) -> None:
+    """字幕包装后台线程：folder 批量（索引字幕）或 file 单文件（外部字幕/索引）。"""
+    from toolbox import subtitle
+
+    def progress(i: int, total: int, f: str, status: str) -> None:
+        STATE.toolbox_sub["current"] = i
+        STATE.toolbox_sub["total"] = total
+        STATE.toolbox_sub["current_file"] = Path(f).name
+        STATE.toolbox_sub["last_status"] = status
+
+    STATE.toolbox_sub["last_status"] = "running"
+    try:
+        if sub_file:
+            ext = Path(sub_file).suffix.lower()
+            text = Path(sub_file).read_text(encoding="utf-8", errors="replace")
+            segs = subtitle.parse_srt(text) if ext == ".srt" else subtitle.parse_ass(text)
+            dst = subtitle.process_video(target, segs, style, out_dir,
+                                         lambda: STATE.toolbox_sub.get("cancel"))
+            STATE.toolbox_sub.update({"ok": 1, "skipped": 0, "failed": 0, "errors": [],
+                                      "total": 1, "current": 1, "current_file": Path(target).name})
+            STATE.toolbox_sub["stage"] = "done"
+        else:
+            res = subtitle.index_burn_videos(target, style, out_dir,
+                                             lambda: STATE.toolbox_sub.get("cancel"), progress)
+            STATE.toolbox_sub.update({
+                "ok": res["ok"], "skipped": res["skipped"], "failed": res["failed"],
+                "errors": res["errors"], "total": res["total"],
+            })
+            STATE.toolbox_sub["stage"] = "cancelled" if STATE.toolbox_sub.get("cancel") else "done"
+    except subtitle.SubtitleError as e:
+        STATE.toolbox_sub["error"] = str(e)
+        STATE.toolbox_sub["stage"] = "error"
+    except Exception as e:  # noqa: BLE001
+        STATE.toolbox_sub["error"] = str(e)
+        STATE.toolbox_sub["stage"] = "error"
+    finally:
+        STATE.toolbox_sub["running"] = False
 
 
 def _toolbox_asr_worker(folder: str, model: str) -> None:
@@ -742,6 +801,14 @@ class Handler(BaseHTTPRequestHandler):
             from toolbox import store
             self._send_json({"ok": True, **store.stats()})
             return
+        if route == "/api/toolbox/sub/status":
+            from toolbox.subtitle import STYLE_NAMES, DEFAULT_STYLE
+            st = dict(STATE.toolbox_sub)
+            st["errors"] = list(st.get("errors") or [])
+            st["style_names"] = STYLE_NAMES
+            st["default_style"] = DEFAULT_STYLE
+            self._send_json(st)
+            return
         if route == "/api/ping":
             self._send_json({"ok": True})
             return
@@ -816,12 +883,30 @@ class Handler(BaseHTTPRequestHandler):
                 "bgm": "选择音乐文件夹",
                 "toolbox": "选择要处理的素材文件夹",
                 "toolbox_out": "选择工具箱输出目录",
+                "toolbox_sub_folder": "选择要烧录字幕的素材文件夹",
+                "toolbox_sub_out": "选择字幕输出目录",
             }.get(name, "选择文件夹")
             if not SELECT_LOCK.acquire(blocking=False):
                 self._send_json({"busy": True, "path": ""})
                 return
             try:
                 path = run_folder_dialog(desc)
+                self._send_json({"path": path, "busy": False})
+            finally:
+                SELECT_LOCK.release()
+            return
+        if route == "/api/select_toolbox_file":
+            kind = (query.get("kind") or ["video"])[0]
+            if not SELECT_LOCK.acquire(blocking=False):
+                self._send_json({"busy": True, "path": ""})
+                return
+            try:
+                if kind == "sub":
+                    path = run_file_dialog("选择字幕文件（SRT/ASS）", "字幕文件|*.srt;*.ass")
+                else:
+                    path = run_file_dialog("选择视频文件", "视频文件|*.mp4;*.mov;*.mkv;*.webm;*.avi;*.flv;*.m4v")
+                if path:
+                    register_allowed_dir(Path(path).resolve().parent)
                 self._send_json({"path": path, "busy": False})
             finally:
                 SELECT_LOCK.release()
@@ -987,6 +1072,16 @@ class Handler(BaseHTTPRequestHandler):
             n = store.clear_index()
             self._send_json({"ok": True, "removed": n})
             return
+        if route == "/api/toolbox/sub/run":
+            self._toolbox_sub_run()
+            return
+        if route == "/api/toolbox/sub/run_file":
+            self._toolbox_sub_run_file()
+            return
+        if route == "/api/toolbox/sub/cancel":
+            STATE.toolbox_sub["cancel"] = True
+            self._send_json({"ok": True})
+            return
         if route == "/api/toolbox/clear_results":
             STATE.toolbox["results"] = []
             STATE.toolbox["stage"] = "idle"
@@ -1081,6 +1176,60 @@ class Handler(BaseHTTPRequestHandler):
         })
         threading.Thread(target=_toolbox_asr_worker, args=(folder, model), daemon=True).start()
         self._send_json({"ok": True, "model": model})
+
+    # ----------------------------------------------------------------
+    # 工具箱：字幕包装（docs/工具箱设计方案.md 第 5 节）
+    # ----------------------------------------------------------------
+    def _toolbox_sub_run(self) -> None:
+        """批量模式：文件夹内视频用①索引字幕烧录。"""
+        if STATE.toolbox_sub.get("running"):
+            self._send_json({"ok": False, "error": "已有字幕任务正在运行"}, 409)
+            return
+        payload = self._read_json()
+        folder = str(payload.get("folder") or "").strip()
+        style = str(payload.get("style") or "minimal").strip()
+        if not folder or not os.path.isdir(folder):
+            self._send_json({"ok": False, "error": "请先选择有效的素材文件夹"}, 400)
+            return
+        from toolbox.subtitle import STYLE_NAMES
+        if style not in STYLE_NAMES:
+            style = "minimal"
+        out_dir = str(payload.get("out_dir") or "").strip() or os.path.join(video_engine._app_root(), "toolbox_export", "字幕包装")
+        STATE.toolbox_sub.update({
+            "running": True, "stage": "running", "mode": "folder", "style": style,
+            "current": 0, "total": 0, "current_file": "", "ok": 0, "skipped": 0,
+            "failed": 0, "errors": [], "cancel": False, "out_dir": out_dir, "error": None,
+        })
+        threading.Thread(target=_toolbox_sub_worker, args=(folder, style, out_dir, None), daemon=True).start()
+        self._send_json({"ok": True, "out_dir": out_dir})
+
+    def _toolbox_sub_run_file(self) -> None:
+        """单文件模式：视频 + 外部 SRT/ASS（无字幕文件则用①索引）。"""
+        if STATE.toolbox_sub.get("running"):
+            self._send_json({"ok": False, "error": "已有字幕任务正在运行"}, 409)
+            return
+        payload = self._read_json()
+        video = str(payload.get("video") or "").strip()
+        sub_file = str(payload.get("sub_file") or "").strip()
+        style = str(payload.get("style") or "minimal").strip()
+        if not video or not os.path.isfile(video):
+            self._send_json({"ok": False, "error": "请选择有效的视频文件"}, 400)
+            return
+        if sub_file and not os.path.isfile(sub_file):
+            self._send_json({"ok": False, "error": "字幕文件不存在"}, 400)
+            return
+        from toolbox.subtitle import STYLE_NAMES
+        if style not in STYLE_NAMES:
+            style = "minimal"
+        out_dir = str(payload.get("out_dir") or "").strip() or os.path.join(video_engine._app_root(), "toolbox_export", "字幕包装")
+        STATE.toolbox_sub.update({
+            "running": True, "stage": "running", "mode": "file", "style": style,
+            "current": 0, "total": 1, "current_file": Path(video).name, "ok": 0, "skipped": 0,
+            "failed": 0, "errors": [], "cancel": False, "out_dir": out_dir, "error": None,
+        })
+        threading.Thread(target=_toolbox_sub_worker,
+                         args=(video, style, out_dir, sub_file or None), daemon=True).start()
+        self._send_json({"ok": True, "out_dir": out_dir})
 
     # ----------------------------------------------------------------
     # 素材与文件
