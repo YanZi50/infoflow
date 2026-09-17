@@ -19,3 +19,9 @@ cache/
 # 模型与索引（运行时生成，不入库）
 models/
 index/
+
+# 工具箱输出与测试残留（运行时产物）
+toolbox_export/
+_tts_test/
+state/
+

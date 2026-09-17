@@ -3,6 +3,20 @@
 > 每次 Git 提交都必须在本文档顶部新增对应说明，内容至少包含：
 > 更新了什么、改动了什么、作用是什么、修复了什么、优化了什么。
 
+## 2026-09-17（R92：工具箱⑥ AI 配音上线——sherpa-onnx 离线中文 TTS + 生成页「口播配音替代原声」联动）
+
+- **AI 配音 Tab**（工具箱第 6 个子功能）：输入文本 → 合成口播旁白 WAV，全程本地离线（sherpa-onnx，onnxruntime 推理，无需联网/显卡）
+  - 音色：默认 2 个——中文女声（Piper-huayan，22050Hz）+ 中文男声（fanchen-wnj，16000Hz），模块化音色表，后续加音色只需加一行配置
+  - 语速可调 0.5~2.0x（映射 VITS length_scale，双击滑杆恢复 1.0x）；长文本自动按句分段合成后拼接（进度按段显示）
+  - 输出目录可选（默认 程序目录/toolbox_export/AI配音）；支持「从识别索引导入」一键导入已识别视频的字幕文本
+- **生成页联动「口播配音（替代成片原声）」**：选择配音 WAV → 成片音轨替换为配音（画面时长不变）
+  - 配音短于成片自动补静音、长于成片自动截断（`replace_audio_with_voiceover`，视频流复制仅重编码音频，秒级）
+  - 顺序在 BGM 混音之前：配音替代原声后仍可叠加 BGM；留空=不使用，完全不影响原生成流程（模块化可弃用）
+- **实现**：`toolbox/tts.py`（懒加载 sherpa_onnx，依赖缺失仅配音不可用）+ web_app `/api/toolbox/tts/status|run|cancel` + `/api/toolbox/asr/texts`（索引文本导出）+ select_toolbox_file 新增 voice 类型（wav/mp3）+ /api/open_file
+- **模型预置**：`models/tts/`（女声 77MB + 男声 131MB + espeak-ng-data 17MB，约 226MB，随包分发免下载）；aishell3（8000Hz 电话音质）与 MeloTTS（需额外 BERT）调研后弃用
+- **修复 sherpa-onnx 1.13.8 三个 API 差异**：VitsModelConfig 不收 rule_fsts/sid（sid 移到 generate）；OfflineTtsConfig 不收 num_threads；**generate 返回 float（-1~1）需乘 32767 转 int16**（此前直接截断导致全静音，已修复并真机验证音量 -20.8dB）
+- **真机验证**：女/男声合成 ✓；API run→done ✓；UI Tab 合成 ✓；配音替代（补静音 19.4s + 截断 60s→19.4s）✓；带配音完整试片 38.8s（前段语音 -23.8dB / 后段静音 -42dB）✓；70 项单测全过 ✓
+
 ## 2026-09-17（R91：识别模型预置进项目——首次使用不再下载，随便携版打包）
 
 - **faster-whisper small（默认，464MB）+ tiny（75MB）模型预置到 `models/faster-whisper-<name>/`**（扁平目录），首次使用秒加载，不再从 HuggingFace 下载

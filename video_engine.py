@@ -703,6 +703,36 @@ def apply_audio_volume(
     run_ffmpeg(args, cancel_event, pause_event, log)
 
 
+def replace_audio_with_voiceover(
+    src: str,
+    voice_wav: str,
+    dst: str,
+    cancel_event,
+    pause_event,
+    log: Optional[Callable[[str], None]] = None,
+) -> None:
+    """口播配音替代原声：保留成片画面，音轨换成配音（对齐成片时长）。
+
+    - 配音短于成片：尾部补静音；配音长于成片：截断到成片时长。
+    - 视频流流复制，仅重编码音频，速度快。
+    """
+    dur = probe_media(src)["duration"] or 0.0
+    dur = max(dur, 0.1)
+    fc = (
+        f"[1:a]aformat=sample_rates=44100:channel_layouts=stereo,apad,"
+        f"atrim=0:{dur:.3f}[a]"
+    )
+    args = [
+        _ffmpeg(), "-y",
+        "-i", src, "-i", voice_wav,
+        "-filter_complex", fc,
+        "-map", "0:v", "-map", "[a]",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+        dst,
+    ]
+    run_ffmpeg(args, cancel_event, pause_event, log)
+
+
 def generate_bgm_wav(dst: str, duration: float = 32.0, sample_rate: int = 44100) -> None:
     duration = max(duration, 8.0)
     t = np.arange(int(sample_rate * duration), dtype=np.float64) / sample_rate
@@ -945,6 +975,7 @@ class JobConfig:
     middle_count: Optional[int] = None
     middle_pools: list[dict] = field(default_factory=list)
     use_subtitle: str = ""   # 字幕样式：''=关 / minimal / outline / bubble / danmaku
+    voiceover_wav: str = ""  # 口播配音（WAV 路径）：替代成片原声；空=不启用
     dedupe_level: str = "off"
     dedupe_options: dict = field(default_factory=lambda: {"visual": True, "segment": True, "audio": True})
     dedupe_versions: int = 1
@@ -1360,6 +1391,16 @@ def _process_one_combo(
             trimmed = str(tempdir / "trimmed.mp4")
             trim_duration(concat_path, trimmed, duration_limit, cancel_event, pause_event, log)
             current = trimmed
+
+        # 口播配音替代原声：在 BGM 混音前替换音轨，配音短补静音、长截断，画面时长不变
+        if config.voiceover_wav and os.path.isfile(config.voiceover_wav):
+            voiced = str(tempdir / "with_voiceover.mp4")
+            log("正在应用口播配音（替代原声）...")
+            replace_audio_with_voiceover(
+                current, config.voiceover_wav, voiced,
+                cancel_event, pause_event, log,
+            )
+            current = voiced
 
         # 原声音量：有 BGM 时在 mix_bgm 原声链处理；无 BGM 时单独重编码音频调整
         if config.bgm_mode == "不使用" and abs(config.audio_volume - 1.0) > 0.001:

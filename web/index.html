@@ -579,6 +579,17 @@
                   </select>
                 </div>
               </div>
+              <div class="field" style="margin-top:10px;max-width:560px">
+                <div class="field-label">
+                  口播配音（替代成片原声）
+                  <span class="card-hint">可用工具箱「AI 配音」生成 WAV；留空=不使用</span>
+                </div>
+                <div class="folder-row">
+                  <input class="input input-path" placeholder="选择配音 WAV 文件（可选）" v-model="params.voiceover_wav">
+                  <button class="btn plain" @click="pickVoiceover" :disabled="selectBusy">选择</button>
+                  <button class="btn plain" v-if="params.voiceover_wav" @click="params.voiceover_wav=''">清除</button>
+                </div>
+              </div>
               <div class="grid-2" style="margin-top:10px">
                 <div class="field">
                   <div class="field-label">原声音量</div>
@@ -1364,6 +1375,76 @@
 
               <div class="card-hint" style="margin-top:12px">
                 提示：仅对口播/人声素材有效。音乐、纯画面（无声）、纯噪声素材会提示失败，不影响其他视频继续处理。
+              </div>
+            </div>
+
+            <!-- AI 配音 -->
+            <div v-show="toolboxUI.tab==='tts'" class="card glass">
+              <div class="card-title"><span class="bar"></span>AI 配音
+                <span class="card-hint" style="font-weight:400">离线中文语音合成：输入文本 → 生成口播旁白（WAV）</span>
+              </div>
+
+              <div class="form-grid">
+                <div class="field" style="grid-column:1/-1">
+                  <div class="field-label">旁白文本
+                    <button class="btn plain" style="margin-left:8px;padding:2px 8px;font-size:12px"
+                            @click="ttsImportAsr" :disabled="toolboxTts.running">从识别索引导入</button>
+                    <span class="card-hint" v-if="toolboxTts.text_len">（当前 {{ toolboxTts.text_len }} 字）</span>
+                  </div>
+                  <textarea class="input" rows="6" v-model="toolboxTts.text"
+                            placeholder="输入要合成的旁白文本，支持长文本（自动分段合成拼接）。也可从「语音识别与索引」导入已识别视频的字幕文本。"></textarea>
+                </div>
+                <div class="field">
+                  <div class="field-label">音色</div>
+                  <select class="input" v-model="toolboxTts.voice" :disabled="toolboxTts.running">
+                    <option v-for="v in toolboxTts.voices" :key="v" :value="v">
+                      {{ (toolboxTts.voice_names && toolboxTts.voice_names[v]) || v }}
+                    </option>
+                  </select>
+                  <div class="card-hint" v-if="!toolboxTts.deps_ok">配音依赖（sherpa-onnx）未就绪</div>
+                  <div class="card-hint" v-else-if="!toolboxTts.voices.length">未检测到可用音色模型</div>
+                </div>
+                <div class="field">
+                  <div class="field-label">语速（0.5~2.0）</div>
+                  <input type="range" min="0.5" max="2" step="0.05" v-model.number="toolboxTts.speed"
+                         style="width:100%" @dblclick="toolboxTts.speed=1.0">
+                  <div class="card-hint">当前 {{ toolboxTts.speed.toFixed(2) }}x（双击滑杆恢复 1.0x）</div>
+                </div>
+                <div class="field" style="grid-column:1/-1">
+                  <div class="field-label">输出目录（留空默认：程序目录/toolbox_export/AI配音）</div>
+                  <div class="folder-row">
+                    <input class="input input-path" placeholder="选择输出目录（可选）" v-model="toolboxTts.out_dir">
+                    <button class="btn plain" @click="ttsSelectOut" :disabled="selectBusy">选择</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="btn-row" style="margin-top:14px">
+                <button class="btn" @click="ttsRun" :disabled="toolboxTts.running || !toolboxTts.deps_ok">开始合成</button>
+                <button v-if="toolboxTts.running" class="btn plain" @click="ttsCancel">取消</button>
+                <button class="btn plain" @click="ttsOpenOut" :disabled="!toolboxTts.out_path && !toolboxTts.out_dir">打开输出目录</button>
+                <button class="btn plain" @click="ttsOpenFile" :disabled="!toolboxTts.out_path">播放试听</button>
+              </div>
+
+              <!-- 进度 -->
+              <div v-if="toolboxTts.total > 0 || toolboxTts.running" style="margin-top:14px">
+                <div class="progress-wrap">
+                  <div class="progress-inner" :style="{width: ttsProgress + '%'}"></div>
+                </div>
+                <div class="progress-info">
+                  <span v-if="toolboxTts.running">合成中 {{ toolboxTts.current }}/{{ toolboxTts.total }} 段…</span>
+                  <span v-else-if="toolboxTts.stage==='done'">
+                    完成：
+                    <template v-if="toolboxTts.out_path">{{ toolboxTts.out_path.split(/[\\/]/).pop() }}（可点击「播放试听」）</template>
+                    <template v-else>已生成 WAV</template>
+                  </span>
+                  <span v-else-if="toolboxTts.stage==='cancelled'">已取消</span>
+                  <span v-else-if="toolboxTts.stage==='error'">出错：{{ toolboxTts.error }}</span>
+                </div>
+              </div>
+
+              <div class="card-hint" style="margin-top:12px">
+                说明：本地离线合成（sherpa-onnx），无需联网与显卡；生成的口播 WAV 可用于生成页「口播配音」联动（替代成片原声）。
               </div>
             </div>
 

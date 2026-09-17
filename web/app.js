@@ -37,6 +37,7 @@ const state = reactive({
   toolboxAsr: { running: false, stage: 'idle', folder: '', model: 'small', current: 0, total: 0, current_file: '', done: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, index_stats: null, models_cached: {}, download: null, last_status: '' },
   toolboxSub: { running: false, stage: 'idle', mode: 'folder', style: 'minimal', folder: '', video: '', sub_file: '', out_dir: '', current: 0, total: 0, current_file: '', ok: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, last_status: '' },
   toolboxVad: { running: false, stage: 'idle', mode: 'folder', sensitivity: 0.5, min_silence: 0.6, keep_pad: 0.3, folder: '', video: '', out_dir: '', current: 0, total: 0, current_file: '', ok: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, last_status: '' },
+  toolboxTts: { running: false, stage: 'idle', voice: 'female', speed: 1.0, text: '', text_len: 0, current: 0, total: 0, out_path: '', out_dir: '', error: null, cancel: false, voices: [], voice_names: {}, deps_ok: true },
   toolboxUI: {
     tab: 'media',           // media/asr/subtitle/cut/match
     folder: '',             // 输入文件夹
@@ -83,6 +84,7 @@ const state = reactive({
     watermark_opacity: 0.6,
     normalize_audio: false,
     use_subtitle: '',   // ''=不使用 / minimal / outline / bubble / danmaku
+    voiceover_wav: '',  // 口播配音 WAV：替代成片原声（留空=不使用）
     fit_mode: 'fit',
     encode_accel: 'auto',
   },
@@ -151,6 +153,7 @@ const toolboxTabs = [
   { id: 'asr', name: '语音识别与索引' },
   { id: 'subtitle', name: '字幕包装' },
   { id: 'cut', name: '剪气口' },
+  { id: 'tts', name: 'AI 配音' },
   { id: 'match', name: '文本匹配拼接' },
 ];
 const toolboxTabName = computed(() => {
@@ -169,7 +172,7 @@ const pageDesc = computed(() => ({
   2: '配置分辨率、时长、转场、BGM、水印等参数',
   3: '设置差异化强度与维度，降低同批投放被判重概率',
   4: '预检素材、批量生成、查看结果与历史',
-  5: '媒体工具、语音识别、字幕包装、剪气口、文本匹配拼接',
+  5: '媒体工具、语音识别、字幕包装、剪气口、AI 配音、文本匹配拼接',
 }[state.step]));
 
 /* ---------- 产出概览（预检后展示） ---------- */
@@ -963,10 +966,103 @@ const vadProgress = computed(() => {
   return Math.max(0, Math.min(100, pct));
 });
 
+/* ---------- 工具箱：AI 配音（sherpa-onnx 离线 TTS） ---------- */
+async function ttsRefreshStatus() {
+  try {
+    const r = await api('/api/toolbox/tts/status');
+    if (r) {
+      state.toolboxTts.voices = r.voices || [];
+      state.toolboxTts.voice_names = r.voice_names || {};
+      state.toolboxTts.deps_ok = !!r.deps_ok;
+      if (!state.toolboxTts.out_dir && r.out_dir) state.toolboxTts.out_dir = r.out_dir;
+    }
+  } catch (e) { /* 静默 */ }
+}
+
+async function ttsSelectOut() {
+  if (state.selectBusy) return;
+  state.selectBusy = true;
+  try {
+    const data = await api('/api/select_folder?name=toolbox_tts_out');
+    if (data.busy) { showMsg('文件夹选择窗口已打开', 'info'); return; }
+    if (data.path) state.toolboxTts.out_dir = data.path;
+  } catch (e) { showMsg('选择失败：' + e.message, 'error'); }
+  finally { state.selectBusy = false; }
+}
+
+async function ttsImportAsr() {
+  try {
+    const r = await api('/api/toolbox/asr/texts');
+    if (!r || !r.ok) { showMsg((r && r.error) || '拉取识别文本失败', 'error'); return; }
+    const items = (r.items || []).filter((it) => it.text);
+    if (!items.length) { showMsg('识别索引为空：请先在「语音识别与索引」页建立索引', 'warn'); return; }
+    let merged = items.map((it) => it.text).join('。');
+    if (state.toolboxTts.text && !/。$/.test(state.toolboxTts.text.trim())) merged = state.toolboxTts.text + '。' + merged;
+    else if (state.toolboxTts.text) merged = state.toolboxTts.text + merged;
+    state.toolboxTts.text = merged;
+    showMsg(`已从识别索引导入 ${items.length} 条文本（${state.toolboxTts.text.length} 字）`, 'success');
+  } catch (e) { showMsg('导入失败：' + e.message, 'error'); }
+}
+
+async function ttsRun() {
+  if (state.toolboxTts.running) return;
+  const text = (state.toolboxTts.text || '').trim();
+  if (!text) { showMsg('请输入要合成的文本', 'error'); return; }
+  if (!state.toolboxTts.deps_ok) { showMsg('配音依赖（sherpa-onnx）未就绪，无法合成', 'error'); return; }
+  const body = {
+    text,
+    voice: state.toolboxTts.voice || 'female',
+    speed: state.toolboxTts.speed || 1.0,
+    out_dir: state.toolboxTts.out_dir || '',
+  };
+  try {
+    const r = await api('/api/toolbox/tts/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r || !r.ok) { showMsg((r && r.error) || '启动失败', 'error'); return; }
+    if (r.out_dir) state.toolboxTts.out_dir = r.out_dir;
+    showMsg('AI 配音任务已启动', 'info');
+  } catch (e) { showMsg('启动失败：' + e.message, 'error'); }
+}
+
+async function ttsCancel() {
+  if (!state.toolboxTts.running) return;
+  await api('/api/toolbox/tts/cancel', {});
+  showMsg('已请求取消', 'info');
+}
+
+function ttsOpenOut() {
+  const p = state.toolboxTts.out_path || state.toolboxTts.out_dir;
+  if (p) api('/api/open_folder', { folder: p });
+}
+
+function ttsOpenFile() {
+  if (state.toolboxTts.out_path) api('/api/open_file', { path: state.toolboxTts.out_path });
+}
+
+const ttsProgress = computed(() => {
+  const total = state.toolboxTts.total || 0;
+  if (!total) return 0;
+  const pct = Math.round(((state.toolboxTts.current || 0) / total) * 100);
+  return Math.max(0, Math.min(100, pct));
+});
+
+/* ---------- 口播配音选择（服务端文件对话框，支持 WAV/MP3） ---------- */
+async function pickVoiceover() {
+  if (state.selectBusy) return;
+  state.selectBusy = true;
+  try {
+    const data = await api('/api/select_toolbox_file?kind=voice');
+    if (data.busy) { showMsg('文件选择窗口已打开', 'info'); return; }
+    if (data.path) {
+      state.params.voiceover_wav = data.path;
+      showMsg('口播配音已选择：' + data.path.split(/[\\/]/).pop(), 'success');
+    }
+  } catch (e) { showMsg('选择失败：' + e.message, 'error'); }
+  finally { state.selectBusy = false; }
+}
+
 /* ---------- 水印选择（服务端文件对话框，直接引用本地文件，不拷贝） ---------- */
 
-async function pickWatermark(e) {
-  e.preventDefault();
+async function pickWatermark(e) {  e.preventDefault();
   try {
     const data = await api('/api/select_watermark');
     if (data.busy) { showMsg('已有窗口打开，请先完成当前选择', 'warn'); return; }
@@ -1313,6 +1409,13 @@ async function poll() {
       };
       state.toolboxVad = { ...state.toolboxVad, ...s.toolbox_vad, ...keep };
     }
+    if (s.toolbox_tts) {
+      const keep = {
+        text: state.toolboxTts.text,
+        out_dir: state.toolboxTts.out_dir || (s.toolbox_tts.out_dir || ''),
+      };
+      state.toolboxTts = { ...state.toolboxTts, ...s.toolbox_tts, ...keep };
+    }
     // 更新下载状态
     if (s.update_download) {
       const wasReady = state.updateDownload && state.updateDownload.stage === 'ready';
@@ -1536,12 +1639,13 @@ createApp({
       toggleTheme, toggleChip, randomizeSeed, shutdownApp,
       downloadUpdate,
       selectAllTransitions, clearTransitions, setTransitionDuration,
-      selectFolder, pickWatermark,
+      selectFolder, pickWatermark, pickVoiceover,
       scan, toggleFixed, fileName, shortError, fmtEta, makeDownloadUrl,
       toolboxSelect, toolboxRun, toolboxCancel, toolboxClear, toolboxOpenOut,
       asrRun, asrCancel, asrClear, asrSelectFolder, asrProgress, asrStats, asrDurationText, asrModelText, asrDlPercent, asrDlText,
       subSelectMain, subSelectFile, subSelectOut, subRun, subCancel, subOpenOut, subProgress,
       vadSelectMain, vadSelectOut, vadRun, vadCancel, vadOpenOut, vadProgress,
+      ttsRefreshStatus, ttsSelectOut, ttsImportAsr, ttsRun, ttsCancel, ttsOpenOut, ttsOpenFile, ttsProgress,
       matVol, setMatVol,
       selectPoolFolder, addMiddlePool, removeMiddlePool, scanPool,
       togglePoolItem, poolOrder, togglePoolExpand,

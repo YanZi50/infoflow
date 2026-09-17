@@ -283,6 +283,19 @@ class AppState:
             "out_dir": "",
             "error": None,
         }
+        # 工具箱-AI 配音任务状态
+        self.toolbox_tts: dict = {
+            "running": False,
+            "stage": "idle",          # idle/running/done/cancelled/error
+            "voice": "female",
+            "speed": 1.0,
+            "text_len": 0,
+            "current": 0,             # 已合成段落数
+            "total": 0,               # 总段落数
+            "out_path": "",
+            "error": None,
+            "cancel": False,
+        }
 
     def add_log(self, message: str) -> None:
         with self.lock:
@@ -358,6 +371,7 @@ class AppState:
                 "toolbox_asr": dict(self.toolbox_asr),
                 "toolbox_sub": dict(self.toolbox_sub),
                 "toolbox_vad": dict(self.toolbox_vad),
+                "toolbox_tts": dict(self.toolbox_tts),
                 "portable": bool(getattr(sys, "frozen", False)),
                 "failed_items": self.result.failed_items if self.result else [],
                 "success_items": _with_sizes(self.result.success_items) if self.result else [],
@@ -536,9 +550,20 @@ def _toolbox_sub_worker(target: str, style: str, out_dir: str,
         STATE.toolbox_sub["running"] = False
 
 
+def _segments_to_text(segments) -> str:
+    """把识别索引导入的 segments 拼成连续文本（用于 AI 配音文本导入）。"""
+    if not isinstance(segments, list):
+        return ""
+    parts = []
+    for seg in segments:
+        t = str((seg or {}).get("text") or "").strip()
+        if t:
+            parts.append(t)
+    return "。".join(parts)
+
+
 def _toolbox_vad_worker(target: str, out_dir: str, sensitivity: float,
                         min_silence: float, keep_pad: float, single_file: bool) -> None:
-    """剪气口后台线程：folder 批量 / file 单文件。"""
     from toolbox import vad_cut
 
     def progress(i: int, total: int, f: str, status: str) -> None:
@@ -571,6 +596,35 @@ def _toolbox_vad_worker(target: str, out_dir: str, sensitivity: float,
         STATE.toolbox_vad["stage"] = "error"
     finally:
         STATE.toolbox_vad["running"] = False
+
+
+def _toolbox_tts_worker(text: str, voice: str, speed: float, out_dir: str) -> None:
+    """AI 配音后台线程：文本合成 wav，进度按段落更新。"""
+    from toolbox import tts as tts_mod
+
+    def cancel() -> bool:
+        return bool(STATE.toolbox_tts.get("cancel"))
+
+    STATE.toolbox_tts["stage"] = "running"
+    try:
+        total = len(tts_mod._split_text(text))
+        STATE.toolbox_tts["total"] = total
+        out_path = str(Path(out_dir) / f"AI配音_{voice}_{time.strftime('%Y%m%d_%H%M%S')}.wav")
+        path, _ = tts_mod.synthesize(
+            text, voice=voice, speed=speed, out_path=out_path,
+            cancel=cancel,
+            progress=lambda i: STATE.toolbox_tts.update(current=i),
+        )
+        STATE.toolbox_tts.update({"out_path": path, "current": STATE.toolbox_tts.get("total", 0)})
+        STATE.toolbox_tts["stage"] = "cancelled" if STATE.toolbox_tts.get("cancel") else "done"
+    except tts_mod.TtsError as e:
+        STATE.toolbox_tts["error"] = str(e)
+        STATE.toolbox_tts["stage"] = "error"
+    except Exception as e:  # noqa: BLE001
+        STATE.toolbox_tts["error"] = str(e)
+        STATE.toolbox_tts["stage"] = "error"
+    finally:
+        STATE.toolbox_tts["running"] = False
 
 
 def _toolbox_asr_worker(folder: str, model: str) -> None:
@@ -870,6 +924,21 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/api/toolbox/vad/status":
             self._send_json(dict(STATE.toolbox_vad))
             return
+        if route == "/api/toolbox/tts/status":
+            from toolbox import tts as tts_mod
+            st = dict(STATE.toolbox_tts)
+            st["voices"] = tts_mod.available_voices()
+            st["voice_names"] = {v: tts_mod.VOICES[v]["name"] for v in tts_mod.VOICES}
+            st["deps_ok"] = tts_mod.deps_ok()
+            self._send_json(st)
+            return
+        if route == "/api/toolbox/asr/texts":
+            from toolbox import store
+            items = store.load_all()
+            texts = [{"path": p, "text": _segments_to_text(it.get("segments"))}
+                     for p, it in items.items() if it.get("segments")]
+            self._send_json({"ok": True, "items": texts})
+            return
         if route == "/api/ping":
             self._send_json({"ok": True})
             return
@@ -948,6 +1017,7 @@ class Handler(BaseHTTPRequestHandler):
                 "toolbox_sub_out": "选择字幕输出目录",
                 "toolbox_vad_in": "选择要剪气口的素材文件夹",
                 "toolbox_vad_out": "选择剪气口输出目录",
+                "toolbox_tts_out": "选择配音输出目录",
             }.get(name, "选择文件夹")
             if not SELECT_LOCK.acquire(blocking=False):
                 self._send_json({"busy": True, "path": ""})
@@ -966,6 +1036,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if kind == "sub":
                     path = run_file_dialog("选择字幕文件（SRT/ASS）", "字幕文件|*.srt;*.ass")
+                elif kind == "voice":
+                    path = run_file_dialog("选择配音音频（WAV/MP3）", "音频文件|*.wav;*.mp3;*.m4a;*.flac;*.aac")
                 else:
                     path = run_file_dialog("选择视频文件", "视频文件|*.mp4;*.mov;*.mkv;*.webm;*.avi;*.flv;*.m4v")
                 if path:
@@ -998,6 +1070,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 os.startfile(folder)  # 资源管理器中打开，不弹黑窗
+                self._send_json({"ok": True})
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"ok": False, "error": str(e)})
+        if route == "/api/open_file":
+            path = (query.get("path") or [""])[0]
+            if not path or not os.path.isfile(path):
+                self._send_json({"ok": False, "error": "文件不存在"}, 404)
+                return
+            try:
+                os.startfile(path)
                 self._send_json({"ok": True})
             except Exception as e:  # noqa: BLE001
                 self._send_json({"ok": False, "error": str(e)})
@@ -1158,6 +1240,13 @@ class Handler(BaseHTTPRequestHandler):
             STATE.toolbox_vad["cancel"] = True
             self._send_json({"ok": True})
             return
+        if route == "/api/toolbox/tts/run":
+            self._toolbox_tts_run()
+            return
+        if route == "/api/toolbox/tts/cancel":
+            STATE.toolbox_tts["cancel"] = True
+            self._send_json({"ok": True})
+            return
         if route == "/api/toolbox/clear_results":
             STATE.toolbox["results"] = []
             STATE.toolbox["stage"] = "idle"
@@ -1309,6 +1398,31 @@ class Handler(BaseHTTPRequestHandler):
                          args=(video, style, out_dir, sub_file or None), daemon=True).start()
         self._send_json({"ok": True, "out_dir": out_dir})
 
+    def _toolbox_tts_run(self) -> None:
+        """AI 配音：文本 → wav（可选输出目录）。"""
+        if STATE.toolbox_tts.get("running"):
+            self._send_json({"ok": False, "error": "已有配音任务正在运行"}, 409)
+            return
+        payload = self._read_json()
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            self._send_json({"ok": False, "error": "请输入要合成的文本"}, 400)
+            return
+        voice = str(payload.get("voice") or "female")
+        speed = float(payload.get("speed") or 1.0)
+        speed = max(0.5, min(2.0, speed))
+        import video_engine
+        out_dir = str(payload.get("out_dir") or "").strip() or os.path.join(video_engine._app_root(), "toolbox_export", "AI配音")
+        os.makedirs(out_dir, exist_ok=True)
+        STATE.toolbox_tts.update({
+            "running": True, "stage": "running", "voice": voice, "speed": speed,
+            "text_len": len(text), "current": 0, "total": 0, "out_path": "",
+            "error": None, "cancel": False,
+        })
+        threading.Thread(target=_toolbox_tts_worker,
+                         args=(text, voice, speed, out_dir), daemon=True).start()
+        self._send_json({"ok": True, "out_dir": out_dir})
+
     def _toolbox_vad_run(self) -> None:
         """批量模式：文件夹内视频剪气口。"""
         if STATE.toolbox_vad.get("running"):
@@ -1445,6 +1559,10 @@ class Handler(BaseHTTPRequestHandler):
         if use_watermark and not watermark_path:
             return "已勾选水印，请填写水印图片路径"
 
+        voiceover_wav = str(payload.get("voiceover_wav") or "").strip()
+        if voiceover_wav and not os.path.isfile(voiceover_wav):
+            return "口播配音文件不存在，请重新选择"
+
         bgm_mode = _safe_choice(str(payload.get("bgm_mode", "不使用")), {"不使用", "本地导入", "音乐文件夹固定", "音乐文件夹随机"}, "不使用")
         bgm_path = str(payload.get("bgm_path", "")).strip()
         bgm_folder = str(payload.get("bgm_folder", "")).strip()
@@ -1530,6 +1648,7 @@ class Handler(BaseHTTPRequestHandler):
             middle_count=middle_count,
             middle_pools=middle_pools,
             use_subtitle=use_subtitle,
+            voiceover_wav=str(payload.get("voiceover_wav") or "").strip(),
             watermark_mode=_safe_choice(str(payload.get("watermark_mode", "铺满全屏")), {"铺满全屏", "角落水印"}, "铺满全屏"),
             watermark_position=_safe_choice(str(payload.get("watermark_position", "右下角")), {"右下角", "右上角", "左下角", "左上角"}, "右下角"),
             watermark_scale=_safe_float(payload.get("watermark_scale", 0.15), 0.15, 0.05, 0.6),
