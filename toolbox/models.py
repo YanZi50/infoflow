@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import threading
 from pathlib import Path
 
@@ -32,6 +33,13 @@ def data_root() -> Path:
 
 
 def models_dir() -> Path:
+    """模型目录：便携版优先用打包内置的 _internal/models（随 exe 分发、目录可写），
+    开发版用 <程序根>/models。"""
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        bundled = Path(meipass) / "models"
+        if bundled.is_dir():
+            return bundled
     d = data_root() / "models"
     d.mkdir(parents=True, exist_ok=True)
     return d

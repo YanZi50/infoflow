@@ -13,7 +13,7 @@ set ZIPNAME=信息流素材一键拼接-便携版-%VER%.zip
 echo [1/3] 用 PyInstaller 打包（onedir + 无控制台 + 应用图标）...
 "%PY%" -m PyInstaller --noconfirm --clean --onedir --noconsole ^
   --name "信息流素材一键拼接" ^
-  --add-data "web;web" 
+  --add-data "web;web" ^
   --add-data "version.txt;." ^
   --add-data "models;models" ^
   --collect-all ctranslate2 ^
