@@ -38,6 +38,7 @@ const state = reactive({
   toolboxSub: { running: false, stage: 'idle', mode: 'folder', style: 'minimal', folder: '', video: '', sub_file: '', out_dir: '', current: 0, total: 0, current_file: '', ok: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, last_status: '' },
   toolboxVad: { running: false, stage: 'idle', mode: 'folder', sensitivity: 0.5, min_silence: 0.6, keep_pad: 0.3, folder: '', video: '', out_dir: '', current: 0, total: 0, current_file: '', ok: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, last_status: '' },
   toolboxTts: { running: false, stage: 'idle', voice: 'female', speed: 1.0, text: '', text_len: 0, current: 0, total: 0, out_path: '', out_dir: '', error: null, cancel: false, voices: [], voice_names: {}, deps_ok: true, service_url: '' },
+  toolboxMatch: { running: false, stage: 'idle', text: '', text_len: 0, current: 0, total: 0, out_path: '', out_burned: '', report: [], videos_used: 0, matched: 0, out_dir: '', burn_style: 'minimal', error: null, cancel: false, deps_ok: true, index_count: 0, last_log: '' },
   toolboxUI: {
     tab: 'media',           // media/asr/subtitle/cut/match
     folder: '',             // 输入文件夹
@@ -1004,6 +1005,31 @@ async function ttsImportAsr() {
   } catch (e) { showMsg('导入失败：' + e.message, 'error'); }
 }
 
+async function matchRun() {
+  if (state.toolboxMatch.running) return;
+  const text = (state.toolboxMatch.text || '').trim();
+  if (!text) { showMsg('请输入要匹配的文案', 'error'); return; }
+  if (!state.toolboxMatch.deps_ok) { showMsg('语义模型未就绪（models/bge-small-zh-v1.5）', 'error'); return; }
+  try {
+    const r = await apiFetch('/api/toolbox/match/run', {
+      method: 'POST', body: JSON.stringify({
+        text, out_dir: state.toolboxMatch.out_dir || '', burn_style: state.toolboxMatch.burn_style || 'minimal',
+      }),
+    });
+    if (!r.ok) showMsg(r.error || '启动失败', 'error');
+    else showMsg('匹配拼接已开始', 'success');
+  } catch (e) { showMsg('启动失败：' + e.message, 'error'); }
+}
+
+async function matchCancel() {
+  try { await apiFetch('/api/toolbox/match/cancel', { method: 'POST' }); } catch (e) { /* 忽略 */ }
+}
+
+async function matchSelectOut() {
+  const r = await pickFolder('选择文本匹配输出目录');
+  if (r) state.toolboxMatch.out_dir = r;
+}
+
 async function ttsRun() {
   if (state.toolboxTts.running) return;
   const text = (state.toolboxTts.text || '').trim();
@@ -1410,6 +1436,10 @@ async function poll() {
         out_dir: state.toolboxVad.out_dir || (s.toolbox_vad.out_dir || ''),
       };
       state.toolboxVad = { ...state.toolboxVad, ...s.toolbox_vad, ...keep };
+    }
+    if (s.toolbox_match) {
+      const keep = { text: state.toolboxMatch.text, out_dir: state.toolboxMatch.out_dir, burn_style: state.toolboxMatch.burn_style };
+      state.toolboxMatch = { ...state.toolboxMatch, ...s.toolbox_match, ...keep };
     }
     if (s.toolbox_tts) {
       const keep = {

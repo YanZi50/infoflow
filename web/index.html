@@ -1456,14 +1456,75 @@
               </div>
             </div>
 
-            <!-- 其他工具：建设中 -->
+            <!-- 文本匹配拼接 -->
             <div v-show="toolboxUI.tab==='match'" class="card glass">
               <div class="card-title"><span class="bar"></span>{{ toolboxTabName }}
-                <span class="card-hint" style="font-weight:400">建设中</span>
+                <span class="card-hint" style="font-weight:400">输入文案 → 从识别索引素材库按语义匹配对口配音片段 → 自动拼接成片</span>
               </div>
-              <div class="empty" style="padding:36px 0">
-                该功能正在开发中，后续版本开放（详见 docs/工具箱设计方案.md）
+              <div class="form-grid">
+                <div class="field" style="grid-column:1/-1">
+                  <div class="field-label">文案（拆句后逐句匹配，每句找最对口视频片段）</div>
+                  <textarea class="input" rows="5" v-model="toolboxMatch.text"
+                    placeholder="输入要成片的文案，例如：&#10;大家好，今天给大家分享一个提高效率的方法。&#10;第一，先做最重要的事。&#10;第二，把大任务拆成小步骤。"></textarea>
+                </div>
+                <div class="field" style="grid-column:1/-1">
+                  <div class="field-label">输出目录（留空默认：程序目录/toolbox_export/文本匹配）</div>
+                  <div class="folder-row">
+                    <input class="input input-path" placeholder="选择输出目录（可选）" v-model="toolboxMatch.out_dir">
+                    <button class="btn plain" @click="matchSelectOut" :disabled="selectBusy">选择</button>
+                  </div>
+                </div>
+                <div class="field" style="grid-column:1/-1">
+                  <div class="field-label">字幕烧录样式（自动烧录文案字幕，同时保留无字幕副本）</div>
+                  <select class="input" v-model="toolboxMatch.burn_style">
+                    <option value="minimal">极简 · 白字细描边</option>
+                    <option value="outline">描边黄 · 粗黑边黄字</option>
+                    <option value="bubble">气泡条 · 半透明背景盒</option>
+                    <option value="danmaku">弹幕 · 顶部横向滚动</option>
+                  </select>
+                </div>
               </div>
+              <div style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap">
+                <button class="btn primary" @click="matchRun" :disabled="toolboxMatch.running || !toolboxMatch.deps_ok">
+                  {{ toolboxMatch.running ? '匹配拼接中…' : '开始匹配拼接' }}
+                </button>
+                <button class="btn plain" @click="matchCancel" :disabled="!toolboxMatch.running">取消</button>
+                <span v-if="toolboxMatch.running" style="color:var(--muted)">进度 {{ toolboxMatch.current }}/{{ toolboxMatch.total || '?' }} · {{ toolboxMatch.last_log }}</span>
+                <span v-else-if="toolboxMatch.deps_ok===false" style="color:var(--danger)">语义模型未就绪（缺少 models/bge-small-zh-v1.5）</span>
+                <span v-else-if="toolboxMatch.error" style="color:var(--danger)">{{ toolboxMatch.error }}</span>
+                <span v-else style="color:var(--muted)">索引素材 {{ toolboxMatch.index_count }} 条视频 · 语义模型已就绪</span>
+              </div>
+              <template v-if="toolboxMatch.out_path">
+                <div class="divider"></div>
+                <div class="field-label" style="margin-bottom:8px">匹配报告（片段使用次数：同片段最多复用 2 次，超过自动换候选）</div>
+                <div style="max-height:260px;overflow:auto;border:1px solid var(--border);border-radius:8px">
+                  <table class="table" style="margin:0">
+                    <thead><tr><th>#</th><th>文案句</th><th>来源视频</th><th>时间段</th><th>匹配度</th><th>模式</th><th>复用</th></tr></thead>
+                    <tbody>
+                      <tr v-for="(r,i) in toolboxMatch.report" :key="i" :style="r.mode==='none' ? 'opacity:.5' : ''">
+                        <td>{{ i+1 }}</td>
+                        <td style="max-width:220px;word-break:break-all">{{ r.sentence }}</td>
+                        <td style="max-width:180px;word-break:break-all">{{ r.source ? r.source.split('\\').pop() : '—' }}</td>
+                        <td>{{ r.mode==='none' ? '—' : r.start.toFixed(1)+'s - '+r.end.toFixed(1)+'s' }}</td>
+                        <td>
+                          <span v-if="r.mode==='none'" style="color:var(--danger)">未匹配</span>
+                          <span v-else-if="r.low" style="color:var(--warning)">{{ r.score.toFixed(2) }} 匹配度低</span>
+                          <span v-else style="color:var(--success)">{{ r.score.toFixed(2) }}</span>
+                        </td>
+                        <td>{{ r.mode==='exact' ? '精确' : (r.mode==='semantic' ? '语义' : '—') }}</td>
+                        <td>{{ r.reused || '—' }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
+                  <a class="btn primary" :href="'/api/open_file?p=' + encodeURIComponent(toolboxMatch.out_path)">打开成片</a>
+                  <a v-if="toolboxMatch.out_burned" class="btn plain" :href="'/api/open_file?p=' + encodeURIComponent(toolboxMatch.out_burned)">打开字幕版</a>
+                  <span style="color:var(--muted);align-self:center">
+                    共 {{ toolboxMatch.total }} 句 · 匹配 {{ toolboxMatch.matched }} 句 · 索引用视频 {{ toolboxMatch.videos_used }} 条
+                  </span>
+                </div>
+              </template>
             </div>
           </section>
 

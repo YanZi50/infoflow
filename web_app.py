@@ -297,6 +297,22 @@ class AppState:
             "cancel": False,
             "service_url": "",        # 远程配音服务地址（留空=本地离线）
         }
+        # 工具箱-文本匹配拼接任务状态
+        self.toolbox_match: dict = {
+            "running": False,
+            "stage": "idle",          # idle/running/done/cancelled/error
+            "text_len": 0,
+            "current": 0,
+            "total": 0,
+            "out_path": "",
+            "out_burned": "",
+            "report": [],             # 匹配报告 [{sentence, source, start, end, score, mode, reused, low}]
+            "videos_used": 0,
+            "matched": 0,
+            "error": None,
+            "cancel": False,
+            "deps_ok": True,
+        }
 
     def add_log(self, message: str) -> None:
         with self.lock:
@@ -373,6 +389,7 @@ class AppState:
                 "toolbox_sub": dict(self.toolbox_sub),
                 "toolbox_vad": dict(self.toolbox_vad),
                 "toolbox_tts": self._toolbox_tts_status(),
+                "toolbox_match": self._toolbox_match_status(),
                 "portable": bool(getattr(sys, "frozen", False)),
                 "failed_items": self.result.failed_items if self.result else [],
                 "success_items": _with_sizes(self.result.success_items) if self.result else [],
@@ -392,6 +409,19 @@ class AppState:
                 data["speed_per_sec"] = rate
                 data["eta_seconds"] = (total - current) / rate
         return data
+
+    def _toolbox_match_status(self) -> dict:
+        """文本匹配拼接状态（含依赖可用性）。"""
+        st = dict(self.toolbox_match)
+        try:
+            from toolbox import matcher as matcher_mod
+            from toolbox import store as _store
+            st["deps_ok"] = matcher_mod.deps_ok()[0]
+            st["index_count"] = len(_store.load_all())
+        except Exception:  # noqa: BLE001
+            st["deps_ok"] = False
+            st["index_count"] = 0
+        return st
 
     def _toolbox_tts_status(self) -> dict:
         """AI 配音状态（含音色表/依赖可用性，供前端轮询直接渲染下拉）。"""
@@ -611,6 +641,45 @@ def _toolbox_vad_worker(target: str, out_dir: str, sensitivity: float,
         STATE.toolbox_vad["stage"] = "error"
     finally:
         STATE.toolbox_vad["running"] = False
+
+
+def _toolbox_match_worker(text: str, out_dir: str, burn_style: str) -> None:
+    """文本匹配拼接后台线程。"""
+    from toolbox import matcher as matcher_mod
+
+    def cancel() -> bool:
+        return bool(STATE.toolbox_match.get("cancel"))
+
+    def log(m: str) -> None:
+        STATE.toolbox_match["last_log"] = m
+
+    STATE.toolbox_match["stage"] = "running"
+    try:
+        sentences = matcher_mod.split_sentences(text)
+        STATE.toolbox_match["total"] = len(sentences)
+        res = matcher_mod.run(
+            text, out_dir, burn_style=burn_style, cancel=cancel, log=log,
+            progress=lambda i, total, m: STATE.toolbox_match.update(
+                current=i, total=total, last_log=m),
+        )
+        STATE.toolbox_match.update({
+            "out_path": res["out_video"],
+            "out_burned": res["out_burned"],
+            "report": res["report"],
+            "videos_used": res["videos_used"],
+            "matched": res["matched"],
+            "current": res["matched"],
+            "total": res["total_sentences"],
+        })
+        STATE.toolbox_match["stage"] = "done"
+    except engine.MediaError as e:
+        STATE.toolbox_match["stage"] = "cancelled" if "取消" in str(e) else "error"
+        STATE.toolbox_match["error"] = str(e)
+    except Exception as e:  # noqa: BLE001
+        STATE.toolbox_match["stage"] = "error"
+        STATE.toolbox_match["error"] = str(e)
+    finally:
+        STATE.toolbox_match["running"] = False
 
 
 def _toolbox_tts_worker(text: str, voice: str, speed: float, out_dir: str, service_url: str = "") -> None:
@@ -948,6 +1017,19 @@ class Handler(BaseHTTPRequestHandler):
             st["deps_ok"] = tts_mod.deps_ok()
             self._send_json(st)
             return
+        if route == "/api/toolbox/match/status":
+            from toolbox import store as _store
+            from toolbox import matcher as matcher_mod
+            st = dict(STATE.toolbox_match)
+            st["report"] = list(st.get("report") or [])
+            try:
+                st["deps_ok"] = matcher_mod.deps_ok()[0]
+                st["index_count"] = len(_store.load_all())
+            except Exception:  # noqa: BLE001
+                st["deps_ok"] = False
+                st["index_count"] = 0
+            self._send_json(st)
+            return
         if route == "/api/toolbox/asr/texts":
             from toolbox import store
             items = store.load_all()
@@ -1263,6 +1345,13 @@ class Handler(BaseHTTPRequestHandler):
             STATE.toolbox_tts["cancel"] = True
             self._send_json({"ok": True})
             return
+        if route == "/api/toolbox/match/run":
+            self._toolbox_match_run()
+            return
+        if route == "/api/toolbox/match/cancel":
+            STATE.toolbox_match["cancel"] = True
+            self._send_json({"ok": True})
+            return
         if route == "/api/toolbox/clear_results":
             STATE.toolbox["results"] = []
             STATE.toolbox["stage"] = "idle"
@@ -1412,6 +1501,32 @@ class Handler(BaseHTTPRequestHandler):
         })
         threading.Thread(target=_toolbox_sub_worker,
                          args=(video, style, out_dir, sub_file or None), daemon=True).start()
+        self._send_json({"ok": True, "out_dir": out_dir})
+
+    def _toolbox_match_run(self) -> None:
+        """文本匹配拼接：文案 → 后台匹配拼接线程。"""
+        if STATE.toolbox_match.get("running"):
+            self._send_json({"ok": False, "error": "已有任务运行中"})
+            return
+        payload = self._read_json()
+        text = str(payload.get("text") or "").strip()
+        if len(text) < 2:
+            self._send_json({"ok": False, "error": "请输入至少 2 个字的文案"})
+            return
+        out_dir = str(payload.get("out_dir") or "").strip()
+        if not out_dir:
+            import video_engine
+            out_dir = os.path.join(video_engine._app_root(), "toolbox_export", "文本匹配")
+        os.makedirs(out_dir, exist_ok=True)
+        burn_style = str(payload.get("burn_style") or "minimal")
+        STATE.toolbox_match.update({
+            "running": True, "stage": "running", "text_len": len(text),
+            "current": 0, "total": 0, "out_path": "", "out_burned": "",
+            "report": [], "videos_used": 0, "matched": 0,
+            "error": None, "cancel": False, "last_log": "开始匹配…",
+        })
+        threading.Thread(target=_toolbox_match_worker,
+                         args=(text, out_dir, burn_style), daemon=True).start()
         self._send_json({"ok": True, "out_dir": out_dir})
 
     def _toolbox_tts_run(self) -> None:
