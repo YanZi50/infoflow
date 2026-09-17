@@ -264,6 +264,25 @@ class AppState:
             "cancel": False,
             "error": None,
         }
+        # 工具箱-剪气口任务状态
+        self.toolbox_vad: dict = {
+            "running": False,
+            "stage": "idle",          # idle/running/done/cancelled/error
+            "mode": "",               # folder / file
+            "sensitivity": 0.5,
+            "min_silence": 0.6,
+            "keep_pad": 0.3,
+            "current": 0,
+            "total": 0,
+            "current_file": "",
+            "ok": 0,
+            "skipped": 0,
+            "failed": 0,
+            "errors": [],             # [{name, error}]
+            "cancel": False,
+            "out_dir": "",
+            "error": None,
+        }
 
     def add_log(self, message: str) -> None:
         with self.lock:
@@ -338,6 +357,7 @@ class AppState:
                 "toolbox": dict(self.toolbox),
                 "toolbox_asr": dict(self.toolbox_asr),
                 "toolbox_sub": dict(self.toolbox_sub),
+                "toolbox_vad": dict(self.toolbox_vad),
                 "portable": bool(getattr(sys, "frozen", False)),
                 "failed_items": self.result.failed_items if self.result else [],
                 "success_items": _with_sizes(self.result.success_items) if self.result else [],
@@ -514,6 +534,43 @@ def _toolbox_sub_worker(target: str, style: str, out_dir: str,
         STATE.toolbox_sub["stage"] = "error"
     finally:
         STATE.toolbox_sub["running"] = False
+
+
+def _toolbox_vad_worker(target: str, out_dir: str, sensitivity: float,
+                        min_silence: float, keep_pad: float, single_file: bool) -> None:
+    """剪气口后台线程：folder 批量 / file 单文件。"""
+    from toolbox import vad_cut
+
+    def progress(i: int, total: int, f: str, status: str) -> None:
+        STATE.toolbox_vad["current"] = i
+        STATE.toolbox_vad["total"] = total
+        STATE.toolbox_vad["current_file"] = Path(f).name
+        STATE.toolbox_vad["last_status"] = status
+
+    STATE.toolbox_vad["last_status"] = "running"
+    try:
+        if single_file:
+            dst = vad_cut.cut_pauses(target, out_dir, sensitivity, min_silence, keep_pad,
+                                     lambda: STATE.toolbox_vad.get("cancel"))
+            STATE.toolbox_vad.update({"ok": 1, "skipped": 0, "failed": 0, "errors": [],
+                                      "total": 1, "current": 1, "current_file": Path(target).name})
+            STATE.toolbox_vad["stage"] = "done"
+        else:
+            res = vad_cut.cut_batch(target, out_dir, sensitivity, min_silence, keep_pad,
+                                    lambda: STATE.toolbox_vad.get("cancel"), progress)
+            STATE.toolbox_vad.update({
+                "ok": res["ok"], "skipped": res["skipped"], "failed": res["failed"],
+                "errors": res["errors"], "total": res["total"],
+            })
+            STATE.toolbox_vad["stage"] = "cancelled" if STATE.toolbox_vad.get("cancel") else "done"
+    except vad_cut.VadError as e:
+        STATE.toolbox_vad["error"] = str(e)
+        STATE.toolbox_vad["stage"] = "error"
+    except Exception as e:  # noqa: BLE001
+        STATE.toolbox_vad["error"] = str(e)
+        STATE.toolbox_vad["stage"] = "error"
+    finally:
+        STATE.toolbox_vad["running"] = False
 
 
 def _toolbox_asr_worker(folder: str, model: str) -> None:
@@ -810,6 +867,9 @@ class Handler(BaseHTTPRequestHandler):
             st["default_style"] = DEFAULT_STYLE
             self._send_json(st)
             return
+        if route == "/api/toolbox/vad/status":
+            self._send_json(dict(STATE.toolbox_vad))
+            return
         if route == "/api/ping":
             self._send_json({"ok": True})
             return
@@ -886,6 +946,8 @@ class Handler(BaseHTTPRequestHandler):
                 "toolbox_out": "选择工具箱输出目录",
                 "toolbox_sub_folder": "选择要烧录字幕的素材文件夹",
                 "toolbox_sub_out": "选择字幕输出目录",
+                "toolbox_vad_in": "选择要剪气口的素材文件夹",
+                "toolbox_vad_out": "选择剪气口输出目录",
             }.get(name, "选择文件夹")
             if not SELECT_LOCK.acquire(blocking=False):
                 self._send_json({"busy": True, "path": ""})
@@ -1083,6 +1145,19 @@ class Handler(BaseHTTPRequestHandler):
             STATE.toolbox_sub["cancel"] = True
             self._send_json({"ok": True})
             return
+        if route == "/api/toolbox/vad/status":
+            self._send_json(dict(STATE.toolbox_vad))
+            return
+        if route == "/api/toolbox/vad/run":
+            self._toolbox_vad_run()
+            return
+        if route == "/api/toolbox/vad/run_file":
+            self._toolbox_vad_run_file()
+            return
+        if route == "/api/toolbox/vad/cancel":
+            STATE.toolbox_vad["cancel"] = True
+            self._send_json({"ok": True})
+            return
         if route == "/api/toolbox/clear_results":
             STATE.toolbox["results"] = []
             STATE.toolbox["stage"] = "idle"
@@ -1195,6 +1270,7 @@ class Handler(BaseHTTPRequestHandler):
         from toolbox.subtitle import STYLE_NAMES
         if style not in STYLE_NAMES:
             style = "minimal"
+        import video_engine
         out_dir = str(payload.get("out_dir") or "").strip() or os.path.join(video_engine._app_root(), "toolbox_export", "字幕包装")
         STATE.toolbox_sub.update({
             "running": True, "stage": "running", "mode": "folder", "style": style,
@@ -1222,6 +1298,7 @@ class Handler(BaseHTTPRequestHandler):
         from toolbox.subtitle import STYLE_NAMES
         if style not in STYLE_NAMES:
             style = "minimal"
+        import video_engine
         out_dir = str(payload.get("out_dir") or "").strip() or os.path.join(video_engine._app_root(), "toolbox_export", "字幕包装")
         STATE.toolbox_sub.update({
             "running": True, "stage": "running", "mode": "file", "style": style,
@@ -1230,6 +1307,56 @@ class Handler(BaseHTTPRequestHandler):
         })
         threading.Thread(target=_toolbox_sub_worker,
                          args=(video, style, out_dir, sub_file or None), daemon=True).start()
+        self._send_json({"ok": True, "out_dir": out_dir})
+
+    def _toolbox_vad_run(self) -> None:
+        """批量模式：文件夹内视频剪气口。"""
+        if STATE.toolbox_vad.get("running"):
+            self._send_json({"ok": False, "error": "已有剪气口任务正在运行"}, 409)
+            return
+        payload = self._read_json()
+        folder = str(payload.get("folder") or "").strip()
+        if not folder or not os.path.isdir(folder):
+            self._send_json({"ok": False, "error": "请先选择有效的素材文件夹"}, 400)
+            return
+        sensitivity = float(payload.get("sensitivity") or 0.5)
+        min_silence = float(payload.get("min_silence") or 0.6)
+        keep_pad = float(payload.get("keep_pad") or 0.3)
+        import video_engine
+        out_dir = str(payload.get("out_dir") or "").strip() or os.path.join(video_engine._app_root(), "toolbox_export", "剪气口")
+        STATE.toolbox_vad.update({
+            "running": True, "stage": "running", "mode": "folder",
+            "sensitivity": sensitivity, "min_silence": min_silence, "keep_pad": keep_pad,
+            "current": 0, "total": 0, "current_file": "", "ok": 0, "skipped": 0,
+            "failed": 0, "errors": [], "cancel": False, "out_dir": out_dir, "error": None,
+        })
+        threading.Thread(target=_toolbox_vad_worker,
+                         args=(folder, out_dir, sensitivity, min_silence, keep_pad, False), daemon=True).start()
+        self._send_json({"ok": True, "out_dir": out_dir})
+
+    def _toolbox_vad_run_file(self) -> None:
+        """单文件模式：单个视频剪气口。"""
+        if STATE.toolbox_vad.get("running"):
+            self._send_json({"ok": False, "error": "已有剪气口任务正在运行"}, 409)
+            return
+        payload = self._read_json()
+        video = str(payload.get("video") or "").strip()
+        if not video or not os.path.isfile(video):
+            self._send_json({"ok": False, "error": "请选择有效的视频文件"}, 400)
+            return
+        sensitivity = float(payload.get("sensitivity") or 0.5)
+        min_silence = float(payload.get("min_silence") or 0.6)
+        keep_pad = float(payload.get("keep_pad") or 0.3)
+        import video_engine
+        out_dir = str(payload.get("out_dir") or "").strip() or os.path.join(video_engine._app_root(), "toolbox_export", "剪气口")
+        STATE.toolbox_vad.update({
+            "running": True, "stage": "running", "mode": "file",
+            "sensitivity": sensitivity, "min_silence": min_silence, "keep_pad": keep_pad,
+            "current": 0, "total": 1, "current_file": Path(video).name, "ok": 0, "skipped": 0,
+            "failed": 0, "errors": [], "cancel": False, "out_dir": out_dir, "error": None,
+        })
+        threading.Thread(target=_toolbox_vad_worker,
+                         args=(video, out_dir, sensitivity, min_silence, keep_pad, True), daemon=True).start()
         self._send_json({"ok": True, "out_dir": out_dir})
 
     # ----------------------------------------------------------------

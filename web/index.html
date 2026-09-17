@@ -1276,8 +1276,99 @@
               </div>
             </div>
 
+            <!-- 剪气口 -->
+            <div v-show="toolboxUI.tab==='cut'" class="card glass">
+              <div class="card-title"><span class="bar"></span>剪气口
+                <span class="card-hint" style="font-weight:400">自动识别并剪掉口播中的长停顿（静音段）</span>
+              </div>
+
+              <div class="form-grid">
+                <div class="field">
+                  <div class="field-label">处理方式</div>
+                  <select id="vad-mode" class="input" v-model="toolboxVad.mode">
+                    <option value="folder">批量：文件夹内所有视频</option>
+                    <option value="file">单文件：一个视频</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <div class="field-label">灵敏度 <span class="card-hint">低=更敏感</span></div>
+                  <input type="range" min="0.2" max="0.9" step="0.05" v-model.number="toolboxVad.sensitivity"
+                         style="width:100%" @dblclick="toolboxVad.sensitivity=0.5">
+                  <div class="card-hint">当前 {{ toolboxVad.sensitivity.toFixed(2) }}（双击滑杆恢复默认 0.50）</div>
+                </div>
+                <div class="field">
+                  <div class="field-label">最短静音（秒）</div>
+                  <input type="range" min="0.1" max="3" step="0.1" v-model.number="toolboxVad.min_silence"
+                         style="width:100%" @dblclick="toolboxVad.min_silence=0.6">
+                  <div class="card-hint">达到该长度才剪（当前 {{ toolboxVad.min_silence.toFixed(1) }}s，双击恢复 0.6s）</div>
+                </div>
+                <div class="field">
+                  <div class="field-label">保留句间留白（秒）</div>
+                  <input type="range" min="0" max="1" step="0.05" v-model.number="toolboxVad.keep_pad"
+                         style="width:100%" @dblclick="toolboxVad.keep_pad=0.3">
+                  <div class="card-hint">每段前后保留（当前 {{ toolboxVad.keep_pad.toFixed(2) }}s，双击恢复 0.30s）</div>
+                </div>
+
+                <div class="field" style="grid-column:1/-1">
+                  <div class="field-label">
+                    <template v-if="toolboxVad.mode==='folder'">素材文件夹（口播人声视频）</template>
+                    <template v-else>视频文件</template>
+                  </div>
+                  <div class="folder-row">
+                    <input class="input input-path" placeholder="选择路径"
+                           :value="toolboxVad.mode==='folder' ? toolboxVad.folder : toolboxVad.video"
+                           @input="toolboxVad.mode==='folder' ? (toolboxVad.folder = $event.target.value) : (toolboxVad.video = $event.target.value)">
+                    <button class="btn plain" @click="vadSelectMain" :disabled="selectBusy">选择</button>
+                  </div>
+                </div>
+                <div class="field" style="grid-column:1/-1">
+                  <div class="field-label">输出目录（留空默认：程序目录/toolbox_export/剪气口）</div>
+                  <div class="folder-row">
+                    <input class="input input-path" placeholder="选择输出目录（可选）" v-model="toolboxVad.out_dir">
+                    <button class="btn plain" @click="vadSelectOut" :disabled="selectBusy">选择</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="btn-row" style="margin-top:14px">
+                <button class="btn" @click="vadRun" :disabled="toolboxVad.running">开始剪气口</button>
+                <button v-if="toolboxVad.running" class="btn plain" @click="vadCancel">取消</button>
+                <button class="btn plain" @click="vadOpenOut" :disabled="!toolboxVad.out_dir">打开输出目录</button>
+              </div>
+
+              <!-- 进度 -->
+              <div v-if="toolboxVad.total > 0 || toolboxVad.running" style="margin-top:14px">
+                <div class="progress-wrap">
+                  <div class="progress-inner" :style="{width: vadProgress + '%'}"></div>
+                </div>
+                <div class="progress-info">
+                  <span v-if="toolboxVad.running && toolboxVad.mode==='file'">正在剪气口…</span>
+                  <span v-else-if="toolboxVad.running">
+                    处理中 {{ toolboxVad.current }}/{{ toolboxVad.total }} · {{ toolboxVad.current_file }}
+                    · 成功 {{ toolboxVad.ok }} / 失败 {{ toolboxVad.failed }}
+                  </span>
+                  <span v-else-if="toolboxVad.stage==='done'">完成：成功 {{ toolboxVad.ok }} · 失败 {{ toolboxVad.failed }}</span>
+                  <span v-else-if="toolboxVad.stage==='cancelled'">已取消（已完成的部分已保存）</span>
+                  <span v-else-if="toolboxVad.stage==='error'">出错：{{ toolboxVad.error }}</span>
+                </div>
+              </div>
+
+              <!-- 失败项 -->
+              <div v-if="toolboxVad.errors.length" class="result-list" style="margin-top:12px">
+                <div class="result-item fail" v-for="(e, i) in toolboxVad.errors" :key="i">
+                  <span class="badge fail">失败</span>
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ e.name }}</span>
+                  <span class="card-hint" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ e.error }}</span>
+                </div>
+              </div>
+
+              <div class="card-hint" style="margin-top:12px">
+                提示：仅对口播/人声素材有效。音乐、纯画面（无声）、纯噪声素材会提示失败，不影响其他视频继续处理。
+              </div>
+            </div>
+
             <!-- 其他工具：建设中 -->
-            <div v-show="toolboxUI.tab==='cut' || toolboxUI.tab==='match'" class="card glass">
+            <div v-show="toolboxUI.tab==='match'" class="card glass">
               <div class="card-title"><span class="bar"></span>{{ toolboxTabName }}
                 <span class="card-hint" style="font-weight:400">建设中</span>
               </div>
