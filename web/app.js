@@ -758,6 +758,17 @@ function toolboxOpenOut() {
 }
 
 /* ---------- 工具箱：语音识别与索引 ---------- */
+async function asrSelectFolder() {
+  if (state.selectBusy) return;
+  state.selectBusy = true;
+  try {
+    const data = await api('/api/select_folder?name=toolbox_sub_folder');
+    if (data.busy) { showMsg('文件夹选择窗口已打开', 'info'); return; }
+    if (data.path) state.toolboxAsr.folder = data.path;
+  } catch (e) { showMsg('选择失败：' + e.message, 'error'); }
+  finally { state.selectBusy = false; }
+}
+
 async function asrRun() {
   if (state.toolboxAsr.running) return;
   if (!state.toolboxAsr.folder) { showMsg('请先选择素材文件夹', 'error'); return; }
@@ -1211,12 +1222,22 @@ async function poll() {
     state.portable = !!s.portable;
     if (s.toolbox) state.toolbox = s.toolbox;
     if (s.toolbox_asr) {
-      state.toolboxAsr = { ...state.toolboxAsr, ...s.toolbox_asr };
+      const keep = { folder: state.toolboxAsr.folder };   // 输入字段不被后端空值覆盖
+      state.toolboxAsr = { ...state.toolboxAsr, ...s.toolbox_asr, ...keep };
       state.toolboxAsr.index_stats = s.toolbox_asr.index_stats || null;
       state.toolboxAsr.models_cached = s.toolbox_asr.models_cached || {};
       state.toolboxAsr.download = s.toolbox_asr.download || null;
     }
-    if (s.toolbox_sub) state.toolboxSub = { ...state.toolboxSub, ...s.toolbox_sub };
+    if (s.toolbox_sub) {
+      const keep = {
+        mode: state.toolboxSub.mode,
+        folder: state.toolboxSub.folder,
+        video: state.toolboxSub.video,
+        sub_file: state.toolboxSub.sub_file,
+        out_dir: state.toolboxSub.out_dir || (s.toolbox_sub.out_dir || ''),
+      };
+      state.toolboxSub = { ...state.toolboxSub, ...s.toolbox_sub, ...keep };
+    }
     // 更新下载状态
     if (s.update_download) {
       const wasReady = state.updateDownload && state.updateDownload.stage === 'ready';
@@ -1443,7 +1464,7 @@ createApp({
       selectFolder, pickWatermark,
       scan, toggleFixed, fileName, shortError, fmtEta, makeDownloadUrl,
       toolboxSelect, toolboxRun, toolboxCancel, toolboxClear, toolboxOpenOut,
-      asrRun, asrCancel, asrClear, asrProgress, asrStats, asrDurationText, asrModelText, asrDlPercent, asrDlText,
+      asrRun, asrCancel, asrClear, asrSelectFolder, asrProgress, asrStats, asrDurationText, asrModelText, asrDlPercent, asrDlText,
       subSelectMain, subSelectFile, subSelectOut, subRun, subCancel, subOpenOut, subProgress,
       matVol, setMatVol,
       selectPoolFolder, addMiddlePool, removeMiddlePool, scanPool,

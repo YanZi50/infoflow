@@ -1108,8 +1108,8 @@
                 <div class="field" style="grid-column:1/-1">
                   <div class="field-label">素材文件夹（可多选池逐个添加）</div>
                   <div class="folder-row">
-                    <input class="input input-path" placeholder="选择要建立索引的素材文件夹" v-model="toolboxAsr.folder">
-                    <button class="btn plain" @click="toolboxSelect('in')" :disabled="selectBusy">选择</button>
+                    <input id="asr-folder" class="input input-path" placeholder="选择要建立索引的素材文件夹" v-model="toolboxAsr.folder">
+                    <button class="btn plain" @click="asrSelectFolder" :disabled="selectBusy">选择</button>
                   </div>
                 </div>
                 <div class="field">
@@ -1196,7 +1196,7 @@
               <div class="form-grid">
                 <div class="field">
                   <div class="field-label">处理方式</div>
-                  <select class="input" v-model="toolboxSub.mode">
+                  <select id="sub-mode" class="input" v-model="toolboxSub.mode">
                     <option value="folder">批量：文件夹 + ①识别索引字幕</option>
                     <option value="file">单文件：视频 + 外部字幕文件</option>
                   </select>
