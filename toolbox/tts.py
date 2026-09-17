@@ -141,11 +141,14 @@ def _split_text(text: str) -> list[str]:
 def synthesize(text: str, voice: str = "female", speed: float = 1.0,
                out_path: str | Path = None,
                cancel: Optional[Callable[[], bool]] = None,
-               progress: Optional[Callable[[int], None]] = None) -> tuple[str, int]:
+               progress: Optional[Callable[[int], None]] = None,
+               service_url: str = "") -> tuple[str, int]:
     """合成文本为 wav，返回 (输出路径, 采样率)。
 
     支持长文本（自动分段合成拼接）；语速 0.5~2.0（内部 length_scale=1/speed）。
     progress(i) 在每段合成完成后回调（i 从 1 起）。
+    service_url 非空时走远程配音服务（OpenAI 兼容 /v1/audio/speech，如本地部署的 VoxCPM），
+    留空=本地 sherpa-onnx 离线合成（模块化：远程服务不可用时本地照常工作）。
     """
     voice = voice if voice in VOICES else "female"
     speed = max(0.5, min(2.0, float(speed)))
@@ -153,6 +156,10 @@ def synthesize(text: str, voice: str = "female", speed: float = 1.0,
         out_path = str(Path.cwd() / f"tts_{voice}_{int(os.getpid())}.wav")
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if service_url and str(service_url).strip():
+        return _synthesize_remote(text, voice, out_path, str(service_url).strip(),
+                                  cancel=cancel, progress=progress)
 
     pieces = _split_text(text)
     tts, sr = _get_synthesizer(voice, speed)
@@ -181,3 +188,45 @@ def synthesize(text: str, voice: str = "female", speed: float = 1.0,
         w.writeframes(merged.tobytes())
     os.replace(str(tmp), str(out_path))
     return str(out_path), sr
+
+
+def _synthesize_remote(text: str, voice: str, out_path: Path,
+                       service_url: str,
+                       cancel: Optional[Callable[[], bool]] = None,
+                       progress: Optional[Callable[[int], None]] = None) -> tuple[str, int]:
+    """远程配音服务（OpenAI 兼容 /v1/audio/speech，如 VoxCPM/vLLM-Omni）。
+
+    返回 wav 字节直写文件；采样率以服务端返回为准（保存后由 ffprobe 探测）。
+    """
+    import json as _json
+    import urllib.request
+
+    if cancel is not None and cancel():
+        raise TtsError("已取消")
+    url = service_url.rstrip("/") + "/v1/audio/speech"
+    payload = {"model": "VoxCPM2", "input": text, "voice": voice, "response_format": "wav"}
+    req = urllib.request.Request(
+        url, data=_json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            data = resp.read()
+    except Exception as e:  # noqa: BLE001
+        raise TtsError(f"远程配音服务连接失败：{e}") from e
+    if not data:
+        raise TtsError("远程配音服务返回空音频")
+    tmp = out_path.with_suffix(".tmp" + out_path.suffix)
+    tmp.write_bytes(data)
+    os.replace(str(tmp), str(out_path))
+    # 探测采样率（服务端可能返回任意采样率 wav）
+    sr = 16000
+    try:
+        import wave
+        with wave.open(str(out_path), "rb") as w:
+            sr = w.getframerate()
+    except Exception:  # noqa: BLE001 非标准 wav 头时回退 16k
+        pass
+    if progress is not None:
+        progress(1)
+    return str(out_path), int(sr)

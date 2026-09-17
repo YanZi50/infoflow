@@ -37,7 +37,7 @@ const state = reactive({
   toolboxAsr: { running: false, stage: 'idle', folder: '', model: 'small', current: 0, total: 0, current_file: '', done: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, index_stats: null, models_cached: {}, download: null, last_status: '' },
   toolboxSub: { running: false, stage: 'idle', mode: 'folder', style: 'minimal', folder: '', video: '', sub_file: '', out_dir: '', current: 0, total: 0, current_file: '', ok: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, last_status: '' },
   toolboxVad: { running: false, stage: 'idle', mode: 'folder', sensitivity: 0.5, min_silence: 0.6, keep_pad: 0.3, folder: '', video: '', out_dir: '', current: 0, total: 0, current_file: '', ok: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, last_status: '' },
-  toolboxTts: { running: false, stage: 'idle', voice: 'female', speed: 1.0, text: '', text_len: 0, current: 0, total: 0, out_path: '', out_dir: '', error: null, cancel: false, voices: [], voice_names: {}, deps_ok: true },
+  toolboxTts: { running: false, stage: 'idle', voice: 'female', speed: 1.0, text: '', text_len: 0, current: 0, total: 0, out_path: '', out_dir: '', error: null, cancel: false, voices: [], voice_names: {}, deps_ok: true, service_url: '' },
   toolboxUI: {
     tab: 'media',           // media/asr/subtitle/cut/match
     folder: '',             // 输入文件夹
@@ -1008,12 +1008,14 @@ async function ttsRun() {
   if (state.toolboxTts.running) return;
   const text = (state.toolboxTts.text || '').trim();
   if (!text) { showMsg('请输入要合成的文本', 'error'); return; }
-  if (!state.toolboxTts.deps_ok) { showMsg('配音依赖（sherpa-onnx）未就绪，无法合成', 'error'); return; }
+  const remote = (state.toolboxTts.service_url || '').trim();
+  if (!remote && !state.toolboxTts.deps_ok) { showMsg('配音依赖（sherpa-onnx）未就绪，请填写远程配音服务地址', 'error'); return; }
   const body = {
     text,
     voice: state.toolboxTts.voice || 'female',
     speed: state.toolboxTts.speed || 1.0,
     out_dir: state.toolboxTts.out_dir || '',
+    service_url: remote,
   };
   try {
     const r = await api('/api/toolbox/tts/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -1413,6 +1415,7 @@ async function poll() {
       const keep = {
         text: state.toolboxTts.text,
         out_dir: state.toolboxTts.out_dir || (s.toolbox_tts.out_dir || ''),
+        service_url: state.toolboxTts.service_url || (s.toolbox_tts.service_url || ''),
       };
       state.toolboxTts = { ...state.toolboxTts, ...s.toolbox_tts, ...keep };
     }

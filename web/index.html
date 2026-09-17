@@ -1417,6 +1417,13 @@
                     <button class="btn plain" @click="ttsSelectOut" :disabled="selectBusy">选择</button>
                   </div>
                 </div>
+                <div class="field" style="grid-column:1/-1">
+                  <div class="field-label">
+                    配音服务地址（高级 · 留空=本地离线）
+                    <span class="card-hint">填 http://127.0.0.1:8000 调 GPU 部署的 VoxCPM（OpenAI 兼容 /v1/audio/speech）</span>
+                  </div>
+                  <input class="input input-path" placeholder="例如 http://127.0.0.1:8000（留空使用本地 sherpa）" v-model="toolboxTts.service_url">
+                </div>
               </div>
 
               <div class="btn-row" style="margin-top:14px">
@@ -1445,6 +1452,7 @@
 
               <div class="card-hint" style="margin-top:12px">
                 说明：本地离线合成（sherpa-onnx），无需联网与显卡；生成的口播 WAV 可用于生成页「口播配音」联动（替代成片原声）。
+                填写「配音服务地址」后改用远程高质量合成（语速由服务端决定，本地语速调节不生效）。
               </div>
             </div>
 

@@ -295,6 +295,7 @@ class AppState:
             "out_path": "",
             "error": None,
             "cancel": False,
+            "service_url": "",        # 远程配音服务地址（留空=本地离线）
         }
 
     def add_log(self, message: str) -> None:
@@ -612,8 +613,8 @@ def _toolbox_vad_worker(target: str, out_dir: str, sensitivity: float,
         STATE.toolbox_vad["running"] = False
 
 
-def _toolbox_tts_worker(text: str, voice: str, speed: float, out_dir: str) -> None:
-    """AI 配音后台线程：文本合成 wav，进度按段落更新。"""
+def _toolbox_tts_worker(text: str, voice: str, speed: float, out_dir: str, service_url: str = "") -> None:
+    """AI 配音后台线程：文本合成 wav，进度按段落更新（远程服务时单请求）。"""
     from toolbox import tts as tts_mod
 
     def cancel() -> bool:
@@ -621,13 +622,14 @@ def _toolbox_tts_worker(text: str, voice: str, speed: float, out_dir: str) -> No
 
     STATE.toolbox_tts["stage"] = "running"
     try:
-        total = len(tts_mod._split_text(text))
+        total = 1 if service_url else len(tts_mod._split_text(text))
         STATE.toolbox_tts["total"] = total
         out_path = str(Path(out_dir) / f"AI配音_{voice}_{time.strftime('%Y%m%d_%H%M%S')}.wav")
         path, _ = tts_mod.synthesize(
             text, voice=voice, speed=speed, out_path=out_path,
             cancel=cancel,
             progress=lambda i: STATE.toolbox_tts.update(current=i),
+            service_url=service_url,
         )
         STATE.toolbox_tts.update({"out_path": path, "current": STATE.toolbox_tts.get("total", 0)})
         STATE.toolbox_tts["stage"] = "cancelled" if STATE.toolbox_tts.get("cancel") else "done"
@@ -1425,16 +1427,17 @@ class Handler(BaseHTTPRequestHandler):
         voice = str(payload.get("voice") or "female")
         speed = float(payload.get("speed") or 1.0)
         speed = max(0.5, min(2.0, speed))
+        service_url = str(payload.get("service_url") or "").strip()
         import video_engine
         out_dir = str(payload.get("out_dir") or "").strip() or os.path.join(video_engine._app_root(), "toolbox_export", "AI配音")
         os.makedirs(out_dir, exist_ok=True)
         STATE.toolbox_tts.update({
             "running": True, "stage": "running", "voice": voice, "speed": speed,
             "text_len": len(text), "current": 0, "total": 0, "out_path": "",
-            "error": None, "cancel": False,
+            "error": None, "cancel": False, "service_url": service_url,
         })
         threading.Thread(target=_toolbox_tts_worker,
-                         args=(text, voice, speed, out_dir), daemon=True).start()
+                         args=(text, voice, speed, out_dir, service_url), daemon=True).start()
         self._send_json({"ok": True, "out_dir": out_dir})
 
     def _toolbox_vad_run(self) -> None:
