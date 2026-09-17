@@ -1093,8 +1093,88 @@
               </div>
             </div>
 
+            <!-- 语音识别与索引 -->
+            <div v-show="toolboxUI.tab==='asr'" class="card glass">
+              <div class="card-title"><span class="bar"></span>语音识别与索引
+                <span class="card-hint" style="font-weight:400">为素材库建字幕索引（文本匹配拼接 / 字幕包装 / 剪气口的前置底座）</span>
+              </div>
+
+              <div class="form-grid">
+                <div class="field" style="grid-column:1/-1">
+                  <div class="field-label">素材文件夹（可多选池逐个添加）</div>
+                  <div class="folder-row">
+                    <input class="input input-path" placeholder="选择要建立索引的素材文件夹" v-model="toolboxAsr.folder">
+                    <button class="btn plain" @click="toolboxSelect('in')" :disabled="selectBusy">选择</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <div class="field-label">识别模型</div>
+                  <select class="input" v-model="toolboxAsr.model">
+                    <option value="small">small · 快速（推荐，中文口播够用，约 460MB）</option>
+                    <option value="large-v3">large-v3 · 精准（断句更好，约 1.5GB，首次索引约慢 3 倍）</option>
+                  </select>
+                  <div class="card-hint" style="margin-top:4px">
+                    <template v-if="toolboxAsr.models_cached && toolboxAsr.models_cached[toolboxAsr.model]">✓ 模型已下载</template>
+                    <template v-else>⚠ 首次使用需下载模型（后台进行，可等待）</template>
+                  </div>
+                </div>
+              </div>
+
+              <div class="btn-row" style="margin-top:14px">
+                <button class="btn" @click="asrRun" :disabled="toolboxAsr.running">开始索引</button>
+                <button v-if="toolboxAsr.running" class="btn plain" @click="asrCancel">取消</button>
+                <button class="btn plain" @click="asrClear" :disabled="toolboxAsr.running || !asrStats.count">清空索引</button>
+              </div>
+
+              <!-- 进度 -->
+              <div v-if="toolboxAsr.total > 0 || toolboxAsr.running" style="margin-top:14px">
+                <div class="progress-wrap">
+                  <div class="progress-inner" :style="{width: asrProgress + '%'}"></div>
+                </div>
+                <div class="progress-info">
+                  <span v-if="toolboxAsr.running && toolboxAsr.last_status==='loading'">正在加载/下载识别模型，首次较慢…</span>
+                  <span v-else-if="toolboxAsr.running">
+                    识别中 {{ toolboxAsr.current }}/{{ toolboxAsr.total }} · {{ toolboxAsr.current_file }}
+                    · 成功 {{ toolboxAsr.done }} / 跳过 {{ toolboxAsr.skipped }} / 失败 {{ toolboxAsr.failed }}
+                  </span>
+                  <span v-else-if="toolboxAsr.stage==='done'">索引完成：成功 {{ toolboxAsr.done }} · 跳过(已有) {{ toolboxAsr.skipped }} · 失败 {{ toolboxAsr.failed }}</span>
+                  <span v-else-if="toolboxAsr.stage==='cancelled'">已取消（断点保留，可再次开始续跑）</span>
+                  <span v-else-if="toolboxAsr.stage==='error'">出错：{{ toolboxAsr.error }}</span>
+                </div>
+              </div>
+
+              <!-- 失败项 -->
+              <div v-if="toolboxAsr.errors.length" class="result-list" style="margin-top:12px">
+                <div class="result-item fail" v-for="(e, i) in toolboxAsr.errors" :key="i">
+                  <span class="badge fail">失败</span>
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ e.name }}</span>
+                  <span class="card-hint" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ e.error }}</span>
+                </div>
+              </div>
+
+              <!-- 索引统计 -->
+              <div v-if="asrStats.count" class="asr-stats">
+                <div class="asr-stat">
+                  <div class="asr-stat-num">{{ asrStats.count }}</div>
+                  <div class="asr-stat-label">已索引视频</div>
+                </div>
+                <div class="asr-stat">
+                  <div class="asr-stat-num">{{ asrDurationText }}</div>
+                  <div class="asr-stat-label">总时长（分钟）</div>
+                </div>
+                <div class="asr-stat">
+                  <div class="asr-stat-num">{{ asrModelText }}</div>
+                  <div class="asr-stat-label">模型分布</div>
+                </div>
+              </div>
+
+              <div class="card-hint" style="margin-top:12px">
+                提示：索引支持<strong>断点续建</strong>（中断后可继续，只识别未完成的）与<strong>增量更新</strong>（之后素材库新增视频，再点一次只处理新增）。
+              </div>
+            </div>
+
             <!-- 其他工具：建设中 -->
-            <div v-show="toolboxUI.tab!=='media'" class="card glass">
+            <div v-show="toolboxUI.tab==='subtitle' || toolboxUI.tab==='cut' || toolboxUI.tab==='match'" class="card glass">
               <div class="card-title"><span class="bar"></span>{{ toolboxTabName }}
                 <span class="card-hint" style="font-weight:400">建设中</span>
               </div>

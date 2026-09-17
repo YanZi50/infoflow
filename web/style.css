@@ -919,3 +919,9 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .toolbox-page .result-item.ok { border-color: rgba(46,204,113,.28); }
 .toolbox-page .result-item.fail { border-color: rgba(231,76,60,.38); }
 @media (prefers-reduced-motion: reduce) { .tb-orb { filter: none; } }
+
+/* 工具箱-语音识别 */
+.asr-stats { display: flex; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
+.asr-stat { flex: 1; min-width: 120px; text-align: center; padding: 12px 8px; border-radius: 12px; background: color-mix(in srgb, var(--bg-soft) 70%, transparent); border: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+.asr-stat-num { font-size: 22px; font-weight: 800; font-family: var(--font-mono); color: var(--accent); }
+.asr-stat-label { font-size: 11px; color: var(--text-3); margin-top: 4px; }

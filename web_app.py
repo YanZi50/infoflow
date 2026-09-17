@@ -230,6 +230,22 @@ class AppState:
             "out_dir": "",
             "error": None,
         }
+        # 工具箱-语音识别与索引任务状态
+        self.toolbox_asr: dict = {
+            "running": False,
+            "stage": "idle",          # idle/running/done/cancelled/error
+            "folder": "",
+            "model": "small",
+            "current": 0,
+            "total": 0,
+            "current_file": "",
+            "done": 0,
+            "skipped": 0,
+            "failed": 0,
+            "errors": [],             # [{name, error}]
+            "cancel": False,
+            "error": None,
+        }
 
     def add_log(self, message: str) -> None:
         with self.lock:
@@ -302,6 +318,7 @@ class AppState:
                 "dedup_progress": self.dedup_progress,
                 "update_download": self.update_download,
                 "toolbox": dict(self.toolbox),
+                "toolbox_asr": dict(self.toolbox_asr),
                 "portable": bool(getattr(sys, "frozen", False)),
                 "failed_items": self.result.failed_items if self.result else [],
                 "success_items": _with_sizes(self.result.success_items) if self.result else [],
@@ -438,6 +455,32 @@ def _toolbox_worker(tool: str, files: list[str], params: dict, out_dir: str) -> 
         STATE.toolbox["stage"] = "error"
     finally:
         STATE.toolbox["running"] = False
+
+
+def _toolbox_asr_worker(folder: str, model: str) -> None:
+    """语音识别索引后台线程：断点续建 + 增量，进度渐进更新 STATE.toolbox_asr。"""
+    from toolbox import asr_index
+
+    def progress(i: int, total: int, f: str, status: str) -> None:
+        STATE.toolbox_asr["current"] = i
+        STATE.toolbox_asr["total"] = total
+        STATE.toolbox_asr["current_file"] = Path(f).name
+        STATE.toolbox_asr["last_status"] = status
+
+    STATE.toolbox_asr["last_status"] = "loading"
+    try:
+        res = asr_index.index_folder(folder, model,
+                                     lambda: STATE.toolbox_asr.get("cancel"), progress)
+        STATE.toolbox_asr.update({
+            "done": res["done"], "skipped": res["skipped"], "failed": res["failed"],
+            "errors": res["errors"], "total": res["total"],
+        })
+        STATE.toolbox_asr["stage"] = "cancelled" if STATE.toolbox_asr.get("cancel") else "done"
+    except Exception as e:  # noqa: BLE001
+        STATE.toolbox_asr["error"] = str(e)
+        STATE.toolbox_asr["stage"] = "error"
+    finally:
+        STATE.toolbox_asr["running"] = False
 
 
 def run_folder_dialog(description: str) -> str:
@@ -684,6 +727,21 @@ class Handler(BaseHTTPRequestHandler):
             tb["results"] = list(tb.get("results") or [])
             self._send_json(tb)
             return
+        if route == "/api/toolbox/asr/status":
+            from toolbox.asr_index import DEFAULT_MODEL
+            from toolbox import models
+            from toolbox import store
+            st = dict(STATE.toolbox_asr)
+            st["errors"] = list(st.get("errors") or [])
+            st["index_stats"] = store.stats()
+            st["models_cached"] = {m: models.whisper_cached(m) for m in ["tiny", "small", "large-v3"]}
+            st["default_model"] = DEFAULT_MODEL
+            self._send_json(st)
+            return
+        if route == "/api/toolbox/asr/stats":
+            from toolbox import store
+            self._send_json({"ok": True, **store.stats()})
+            return
         if route == "/api/ping":
             self._send_json({"ok": True})
             return
@@ -917,6 +975,18 @@ class Handler(BaseHTTPRequestHandler):
             STATE.toolbox["cancel"] = True
             self._send_json({"ok": True})
             return
+        if route == "/api/toolbox/asr/run":
+            self._toolbox_asr_run()
+            return
+        if route == "/api/toolbox/asr/cancel":
+            STATE.toolbox_asr["cancel"] = True
+            self._send_json({"ok": True})
+            return
+        if route == "/api/toolbox/asr/clear":
+            from toolbox import store
+            n = store.clear_index()
+            self._send_json({"ok": True, "removed": n})
+            return
         if route == "/api/toolbox/clear_results":
             STATE.toolbox["results"] = []
             STATE.toolbox["stage"] = "idle"
@@ -987,6 +1057,30 @@ class Handler(BaseHTTPRequestHandler):
         })
         threading.Thread(target=_toolbox_worker, args=(tool, files, params, out_dir), daemon=True).start()
         self._send_json({"ok": True, "total": len(files)})
+
+    # ----------------------------------------------------------------
+    # 工具箱：语音识别与索引（docs/工具箱设计方案.md 第 3 节）
+    # ----------------------------------------------------------------
+    def _toolbox_asr_run(self) -> None:
+        if STATE.toolbox_asr.get("running"):
+            self._send_json({"ok": False, "error": "已有索引任务正在运行"}, 409)
+            return
+        payload = self._read_json()
+        folder = str(payload.get("folder") or "").strip()
+        model = str(payload.get("model") or "small").strip()
+        if not folder or not os.path.isdir(folder):
+            self._send_json({"ok": False, "error": "请先选择有效的素材文件夹"}, 400)
+            return
+        from toolbox.asr_index import WHISPER_SIZES
+        if model not in WHISPER_SIZES:
+            model = "small"
+        STATE.toolbox_asr.update({
+            "running": True, "stage": "running", "folder": folder, "model": model,
+            "current": 0, "total": 0, "current_file": "", "done": 0,
+            "skipped": 0, "failed": 0, "errors": [], "cancel": False, "error": None,
+        })
+        threading.Thread(target=_toolbox_asr_worker, args=(folder, model), daemon=True).start()
+        self._send_json({"ok": True, "model": model})
 
     # ----------------------------------------------------------------
     # 素材与文件

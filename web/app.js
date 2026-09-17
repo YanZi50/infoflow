@@ -34,6 +34,7 @@ const state = reactive({
   materials: { head: [], tail: [], middle: [], bgm: [] },
   fixed: { head: '', tail: '', middle: '', bgm: '' },
   toolbox: { running: false, stage: 'idle', tool: '', current: 0, total: 0, current_file: '', results: [], cancel: false, out_dir: '', error: null },
+  toolboxAsr: { running: false, stage: 'idle', folder: '', model: 'small', current: 0, total: 0, current_file: '', done: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, index_stats: null, models_cached: {}, last_status: '' },
   toolboxUI: {
     tab: 'media',           // media/asr/subtitle/cut/match
     folder: '',             // 输入文件夹
@@ -754,6 +755,47 @@ function toolboxOpenOut() {
   if (state.toolboxUI.out_dir) api('/api/open_folder', { folder: state.toolboxUI.out_dir });
 }
 
+/* ---------- 工具箱：语音识别与索引 ---------- */
+async function asrRun() {
+  if (state.toolboxAsr.running) return;
+  if (!state.toolboxAsr.folder) { showMsg('请先选择素材文件夹', 'error'); return; }
+  const r = await api('/api/toolbox/asr/run', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folder: state.toolboxAsr.folder, model: state.toolboxAsr.model }),
+  });
+  if (!r || !r.ok) { showMsg((r && r.error) || '启动失败', 'error'); return; }
+  showMsg('索引任务已启动（首次需下载模型，稍候）', 'info');
+}
+
+async function asrCancel() {
+  if (!state.toolboxAsr.running) return;
+  await api('/api/toolbox/asr/cancel', {});
+  showMsg('已请求取消索引（断点保留）', 'info');
+}
+
+async function asrClear() {
+  if (!confirm('确定清空全部索引吗？之后需重新识别（不会删除素材）')) return;
+  const r = await api('/api/toolbox/asr/clear', {});
+  if (r && r.ok) showMsg(`已清空 ${r.removed} 条索引`, 'success');
+}
+
+const asrProgress = computed(() => {
+  const total = state.toolboxAsr.total || 0;
+  if (!total) return 0;
+  const pct = Math.round(((state.toolboxAsr.current || 0) / total) * 100);
+  return Math.max(0, Math.min(100, pct));
+});
+const asrStats = computed(() => state.toolboxAsr.index_stats || { count: 0, by_model: {}, total_duration: 0 });
+const asrDurationText = computed(() => {
+  const s = Math.round((asrStats.value.total_duration || 0) / 60);
+  return s < 1000 ? String(s) : (s / 60).toFixed(1) + '小时';
+});
+const asrModelText = computed(() => {
+  const m = asrStats.value.by_model || {};
+  const parts = Object.entries(m).map(([k, v]) => `${k}×${v}`);
+  return parts.length ? parts.join(' + ') : '—';
+});
+
 /* ---------- 水印选择（服务端文件对话框，直接引用本地文件，不拷贝） ---------- */
 
 async function pickWatermark(e) {
@@ -1078,6 +1120,11 @@ async function poll() {
     state.dedupProgress = s.dedup_progress || null;
     state.portable = !!s.portable;
     if (s.toolbox) state.toolbox = s.toolbox;
+    if (s.toolbox_asr) {
+      state.toolboxAsr = { ...state.toolboxAsr, ...s.toolbox_asr };
+      state.toolboxAsr.index_stats = s.toolbox_asr.index_stats || null;
+      state.toolboxAsr.models_cached = s.toolbox_asr.models_cached || {};
+    }
     // 更新下载状态
     if (s.update_download) {
       const wasReady = state.updateDownload && state.updateDownload.stage === 'ready';
@@ -1304,6 +1351,7 @@ createApp({
       selectFolder, pickWatermark,
       scan, toggleFixed, fileName, shortError, fmtEta, makeDownloadUrl,
       toolboxSelect, toolboxRun, toolboxCancel, toolboxClear, toolboxOpenOut,
+      asrRun, asrCancel, asrClear, asrProgress, asrStats, asrDurationText, asrModelText,
       matVol, setMatVol,
       selectPoolFolder, addMiddlePool, removeMiddlePool, scanPool,
       togglePoolItem, poolOrder, togglePoolExpand,
