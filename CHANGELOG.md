@@ -3,6 +3,16 @@
 > 每次 Git 提交都必须在本文档顶部新增对应说明，内容至少包含：
 > 更新了什么、改动了什么、作用是什么、修复了什么、优化了什么。
 
+## 2026-09-17（R91：识别模型预置进项目——首次使用不再下载，随便携版打包）
+
+- **faster-whisper small（默认，464MB）+ tiny（75MB）模型预置到 `models/faster-whisper-<name>/`**（扁平目录），首次使用秒加载，不再从 HuggingFace 下载
+  - large-v3（1.5GB）不内置，仍按需下载（界面提示）
+- **models.py 加载逻辑**：优先本地预置目录 → 存在直接加载（秒开）；缺失才走 HF 下载 + 进度条
+- **打包脚本更新**：移除 `--exclude-module faster_whisper`（此前识别装箱后不可用）、新增 `--add-data "models;models"` 与 `--collect-all ctranslate2`（faster-whisper 推理核心），便携版开箱即用
+- 模型下载走 curl 直链断点续传（hf-mirror 限速 0.75MB/s 且易断 → 直链 4.5MB/s 稳定）；下载完成 sha256 校验一致
+- **真机验证**：本地加载耗时 1.0s（无下载）；TTS 语音识别输出准确（zh）；ASR 状态 tiny/small 均显示已就绪
+- 模型目录由 .gitignore 排除（不入库，仅随便携版打包分发）
+
 ## 2026-09-17（R90：工具箱④ 剪气口上线——silero-vad 自动剪掉口播长停顿）
 
 - **剪气口 Tab**：识别并剪掉口播视频中的长静音，输出拼接后的连续视频（重新编码保兼容）

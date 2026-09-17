@@ -15,8 +15,10 @@ echo [1/3] 用 PyInstaller 打包（onedir + 无控制台 + 应用图标）...
   --name "信息流素材一键拼接" ^
   --add-data "web;web" 
   --add-data "version.txt;." ^
+  --add-data "models;models" ^
+  --collect-all ctranslate2 ^
   --collect-submodules imageio_ffmpeg ^
-  --exclude-module faster_whisper ^
+  --collect-submodules faster_whisper ^
   --icon app.ico ^
   web_app.py
 if errorlevel 1 ( echo 打包失败 & pause & exit /b 1 )

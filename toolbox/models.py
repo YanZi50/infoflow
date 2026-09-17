@@ -45,8 +45,13 @@ def set_hf_mirror() -> None:
 
 
 def whisper_cached(name: str) -> bool:
-    """该 whisper 模型是否已下载完成（目录内有 config.json 即视为已缓存）。"""
+    """该 whisper 模型是否已就绪：优先本地预置目录（models/faster-whisper-<name>/），
+    其次 huggingface 缓存（models/models--Systran--faster-whisper-<name>/）。"""
+    name = (name or "small").strip()
     try:
+        local = models_dir() / f"faster-whisper-{name}"
+        if (local / "model.bin").is_file() and (local / "config.json").is_file():
+            return True
         base = models_dir() / f"models--Systran--faster-whisper-{name}"
         if base.is_dir():
             for snap in base.rglob("config.json"):
@@ -59,7 +64,8 @@ def whisper_cached(name: str) -> bool:
 def get_whisper(name: str):
     """获取（必要时下载）whisper 模型，进程内单例缓存。
 
-    首次下载期间通过 download_state() 暴露进度（tqdm hook 拦截字节数）。
+    优先加载本地预置模型（models/faster-whisper-<name>/，随便携版打包）；
+    缺失时才从 HuggingFace 下载（期间通过 download_state() 暴露进度）。
     """
     name = (name or "small").strip()
     if name not in {"tiny", "base", "small", "medium", "large-v3"}:
@@ -68,6 +74,11 @@ def get_whisper(name: str):
         if name in _MODELS:
             return _MODELS[name]
         from faster_whisper import WhisperModel
+        local = models_dir() / f"faster-whisper-{name}"
+        if (local / "model.bin").is_file() and (local / "config.json").is_file():
+            model = WhisperModel(str(local), device="cpu", compute_type="int8")
+            _MODELS[name] = model
+            return model
         set_hf_mirror()
         _DL.update({"active": True, "model": name, "file": "", "n": 0, "total": 0, "done": False, "error": None})
         restore = _patch_tqdm()
