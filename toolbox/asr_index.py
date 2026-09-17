@@ -28,6 +28,15 @@ def transcribe_one(video_path: str, model_name: str = DEFAULT_MODEL,
     """
     if not Path(video_path).is_file():
         raise engine.MediaError(f"文件不存在：{video_path}")
+    # 无音轨视频（纯画面素材）直接返回空索引，避免 whisper 内部崩溃（tuple index out of range）
+    if not engine.has_audio(video_path):
+        return {
+            "path": video_path,
+            "model": model_name,
+            "duration": round(engine.probe_duration(video_path), 2),
+            "segments": [],
+            "ts": time.time(),
+        }
     model = models.get_whisper(model_name)
     segments_iter, info = model.transcribe(
         video_path, vad_filter=True, beam_size=5, language=None,

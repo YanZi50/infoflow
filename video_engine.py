@@ -944,7 +944,7 @@ class JobConfig:
     middle_items: list[str] = field(default_factory=list)
     middle_count: Optional[int] = None
     middle_pools: list[dict] = field(default_factory=list)
-    use_subtitle: bool = False
+    use_subtitle: str = ""   # 字幕样式：''=关 / minimal / outline / bubble / danmaku
     dedupe_level: str = "off"
     dedupe_options: dict = field(default_factory=lambda: {"visual": True, "segment": True, "audio": True})
     dedupe_versions: int = 1
@@ -1402,7 +1402,13 @@ def _process_one_combo(
             srt_path = str(tempdir / "subtitle.srt")
             subtitle_plugin.generate_subtitles(head, tail, head_info["duration"], srt_path)
             subtitled = str(tempdir / "with_subtitle.mp4")
-            burn_subtitles(current, srt_path, subtitled, cancel_event, pause_event, log, encode_accel=config.encode_accel)
+            # 样式烧录复用工具箱模板（docs/工具箱设计方案.md：生成页联动）
+            from toolbox.subtitle import burn_with_style
+            burn_with_style(
+                current, srt_path, subtitled, config.use_subtitle,
+                cancel=lambda: cancel_event.is_set(),
+                encode_accel=config.encode_accel,
+            )
             current = subtitled
 
         if config.use_watermark:

@@ -3,6 +3,15 @@
 > 每次 Git 提交都必须在本文档顶部新增对应说明，内容至少包含：
 > 更新了什么、改动了什么、作用是什么、修复了什么、优化了什么。
 
+## 2026-09-17（R88：③收尾——生成页自动字幕升级 4 样式选择 + 模型下载进度显示）
+
+- **生成页「自动字幕」从开关升级为样式选择**：不使用 / 极简 / 描边黄 / 气泡条 / 弹幕，烧录复用工具箱字幕包装的 4 套 ASS 模板（`burn_with_style`：SRT → ASS → 烧录，尊重 GPU 编码加速）
+  - 参数 `use_subtitle` 由 bool 改为样式字符串；旧版配置 `true` 自动映射为「极简」（保持原白字行为），兼容存档
+- **模型下载进度显示**：ASR 页识别模型首次下载时实时显示进度条（tqdm hook 拦截字节数 → `/api/toolbox/asr/status` 透出 → 前端百分比 + 已下载/总量）
+- **修复：无音轨视频导致索引崩溃**（whisper 内部 `tuple index out of range`）——识别前用 ffmpeg 自身探测音轨（`engine.has_audio`），无音轨直接返回空索引，不断点重复、不误报失败
+- **修复：imageio_ffmpeg 不带 ffprobe 导致时长/音轨探测失效**——`probe_duration`/`has_audio` 全部改用 ffmpeg `-i` 解析 stderr 流信息，不再依赖 ffprobe
+- **实测**：burn_with_style 4 样式真机出片；无音轨+有音轨混合批量 2/2；下载进度 hook 生效（tiny 重下验证）；smoke_test 70 + e2e_ui 4 全绿
+
 ## 2026-09-17（R87：工具箱③ 字幕包装上线——4 套样式模板 + 双模式烧录）
 
 - **新增 `toolbox/subtitle.py`**：字幕包装核心——

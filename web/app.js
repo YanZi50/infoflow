@@ -34,7 +34,7 @@ const state = reactive({
   materials: { head: [], tail: [], middle: [], bgm: [] },
   fixed: { head: '', tail: '', middle: '', bgm: '' },
   toolbox: { running: false, stage: 'idle', tool: '', current: 0, total: 0, current_file: '', results: [], cancel: false, out_dir: '', error: null },
-  toolboxAsr: { running: false, stage: 'idle', folder: '', model: 'small', current: 0, total: 0, current_file: '', done: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, index_stats: null, models_cached: {}, last_status: '' },
+  toolboxAsr: { running: false, stage: 'idle', folder: '', model: 'small', current: 0, total: 0, current_file: '', done: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, index_stats: null, models_cached: {}, download: null, last_status: '' },
   toolboxSub: { running: false, stage: 'idle', mode: 'folder', style: 'minimal', folder: '', video: '', sub_file: '', out_dir: '', current: 0, total: 0, current_file: '', ok: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, last_status: '' },
   toolboxUI: {
     tab: 'media',           // media/asr/subtitle/cut/match
@@ -81,7 +81,7 @@ const state = reactive({
     watermark_scale: 0.15,
     watermark_opacity: 0.6,
     normalize_audio: false,
-    use_subtitle: false,
+    use_subtitle: '',   // ''=不使用 / minimal / outline / bubble / danmaku
     fit_mode: 'fit',
     encode_accel: 'auto',
   },
@@ -496,7 +496,8 @@ function applyConfig(cfg, restoreFixed = true, restorePaths = true) {
   p.watermark_scale = cfg.watermark_scale ?? 0.15;
   p.watermark_opacity = cfg.watermark_opacity ?? 0.6;
   p.normalize_audio = !!cfg.normalize_audio;
-  p.use_subtitle = !!cfg.use_subtitle;
+  // 字幕样式：旧版 bool true → minimal（保持白字行为）
+  p.use_subtitle = cfg.use_subtitle === true ? 'minimal' : (cfg.use_subtitle || '');
   ['head', 'tail', 'middle', 'bgm'].forEach((k) => scan(k));
 }
 
@@ -795,6 +796,18 @@ const asrModelText = computed(() => {
   const m = asrStats.value.by_model || {};
   const parts = Object.entries(m).map(([k, v]) => `${k}×${v}`);
   return parts.length ? parts.join(' + ') : '—';
+});
+const asrDlPercent = computed(() => {
+  const d = state.toolboxAsr.download;
+  if (!d || !d.total) return 0;
+  return Math.max(0, Math.min(100, Math.round((d.n / d.total) * 100)));
+});
+const asrDlText = computed(() => {
+  const d = state.toolboxAsr.download;
+  if (!d) return '';
+  const mb = (n) => (n / 1024 / 1024).toFixed(0) + 'MB';
+  const base = d.file ? d.file.replace(/^.*faster-whisper-/, '').replace(/\.bin.*$/, '.bin') : '';
+  return d.total ? `${base} ${mb(d.n || 0)}/${mb(d.total)}` : (base || '连接镜像…');
 });
 
 /* ---------- 工具箱：字幕包装 ---------- */
@@ -1201,6 +1214,7 @@ async function poll() {
       state.toolboxAsr = { ...state.toolboxAsr, ...s.toolbox_asr };
       state.toolboxAsr.index_stats = s.toolbox_asr.index_stats || null;
       state.toolboxAsr.models_cached = s.toolbox_asr.models_cached || {};
+      state.toolboxAsr.download = s.toolbox_asr.download || null;
     }
     if (s.toolbox_sub) state.toolboxSub = { ...state.toolboxSub, ...s.toolbox_sub };
     // 更新下载状态
@@ -1429,7 +1443,7 @@ createApp({
       selectFolder, pickWatermark,
       scan, toggleFixed, fileName, shortError, fmtEta, makeDownloadUrl,
       toolboxSelect, toolboxRun, toolboxCancel, toolboxClear, toolboxOpenOut,
-      asrRun, asrCancel, asrClear, asrProgress, asrStats, asrDurationText, asrModelText,
+      asrRun, asrCancel, asrClear, asrProgress, asrStats, asrDurationText, asrModelText, asrDlPercent, asrDlText,
       subSelectMain, subSelectFile, subSelectOut, subRun, subCancel, subOpenOut, subProgress,
       matVol, setMatVol,
       selectPoolFolder, addMiddlePool, removeMiddlePool, scanPool,

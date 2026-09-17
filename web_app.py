@@ -795,6 +795,7 @@ class Handler(BaseHTTPRequestHandler):
             st["index_stats"] = store.stats()
             st["models_cached"] = {m: models.whisper_cached(m) for m in ["tiny", "small", "large-v3"]}
             st["default_model"] = DEFAULT_MODEL
+            st["download"] = models.download_state()
             self._send_json(st)
             return
         if route == "/api/toolbox/asr/stats":
@@ -1304,7 +1305,13 @@ class Handler(BaseHTTPRequestHandler):
         count = _safe_int(payload.get("count", 10), 10, 1, 200)
 
         use_watermark = bool(payload.get("use_watermark", False))
-        use_subtitle = bool(payload.get("use_subtitle", False))
+        raw_sub = payload.get("use_subtitle", "")
+        if raw_sub is True:
+            use_subtitle = "minimal"      # 旧版 bool 配置 → 保持白字样式
+        elif raw_sub is False or raw_sub is None:
+            use_subtitle = ""
+        else:
+            use_subtitle = str(raw_sub).strip()
         if use_subtitle and not subtitle_plugin.available():
             return "自动字幕需要 faster-whisper，请先运行：pip install faster-whisper"
         watermark_path = str(payload.get("watermark_path", "")).strip()

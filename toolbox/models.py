@@ -13,6 +13,14 @@ from pathlib import Path
 
 _LOCK = threading.Lock()
 
+# 模型下载进度状态（供前端轮询）：active/n/file/n/total/done/error
+_DL: dict = {"active": False, "model": "", "file": "", "n": 0, "total": 0, "done": False, "error": None}
+
+
+def download_state() -> dict:
+    """当前模型下载进度快照（复制返回，避免外部篡改）。"""
+    return dict(_DL)
+
 
 def data_root() -> Path:
     """程序数据根目录（与 history/configs 同级）：便携版=exe 目录，开发版=项目目录。"""
@@ -49,7 +57,10 @@ def whisper_cached(name: str) -> bool:
 
 
 def get_whisper(name: str):
-    """获取（必要时下载）whisper 模型，进程内单例缓存。"""
+    """获取（必要时下载）whisper 模型，进程内单例缓存。
+
+    首次下载期间通过 download_state() 暴露进度（tqdm hook 拦截字节数）。
+    """
     name = (name or "small").strip()
     if name not in {"tiny", "base", "small", "medium", "large-v3"}:
         name = "small"
@@ -58,10 +69,48 @@ def get_whisper(name: str):
             return _MODELS[name]
         from faster_whisper import WhisperModel
         set_hf_mirror()
-        model = WhisperModel(name, device="cpu", compute_type="int8",
-                             download_root=str(models_dir()))
-        _MODELS[name] = model
-        return model
+        _DL.update({"active": True, "model": name, "file": "", "n": 0, "total": 0, "done": False, "error": None})
+        restore = _patch_tqdm()
+        try:
+            model = WhisperModel(name, device="cpu", compute_type="int8",
+                                 download_root=str(models_dir()))
+            _MODELS[name] = model
+            _DL["done"] = True
+            return model
+        except Exception as e:
+            _DL["error"] = str(e)
+            raise
+        finally:
+            _DL["active"] = False
+            if restore is not None:
+                restore()
+
+
+def _patch_tqdm():
+    """拦截 tqdm 进度（huggingface_hub 下载用 tqdm 显示字节数），写入 _DL。
+
+    仅在本进程内、下载期间生效；结束后恢复原始实现，避免污染其他用法。
+    """
+    try:
+        from tqdm.std import tqdm as _tqdm
+    except Exception:
+        return None
+    orig = _tqdm.update
+
+    def update(self, n=1):
+        try:
+            if self.total and self.n is not None:
+                _DL["n"] = int(self.n)
+                _DL["total"] = int(self.total)
+                d = (self.desc or "").strip()
+                if d:
+                    _DL["file"] = d
+        except Exception:
+            pass
+        return orig(self, n)
+
+    _tqdm.update = update
+    return lambda: setattr(_tqdm, "update", orig)
 
 
 _MODELS: dict = {}

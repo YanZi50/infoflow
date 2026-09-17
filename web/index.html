@@ -568,11 +568,16 @@
                   <input type="checkbox" v-model="params.normalize_audio"><span class="track"></span>
                   <span class="switch-label">统一音量（响度归一）</span>
                 </label>
-                <label class="switch">
-                  <input type="checkbox" v-model="params.use_subtitle"><span class="track"></span>
-                  <span class="switch-label">自动字幕</span>
-                </label>
-                <span class="card-hint">字幕需要 faster-whisper</span>
+                <div class="field" style="margin-top:0">
+                  <div class="field-label">自动字幕（需 faster-whisper，识别开头+结尾素材语音）</div>
+                  <select class="input" v-model="params.use_subtitle" style="max-width:220px">
+                    <option value="">不使用</option>
+                    <option value="minimal">极简 · 白字细描边</option>
+                    <option value="outline">描边黄 · 粗黑边黄字</option>
+                    <option value="bubble">气泡条 · 半透明背景盒</option>
+                    <option value="danmaku">弹幕 · 顶部横向滚动</option>
+                  </select>
+                </div>
               </div>
               <div class="grid-2" style="margin-top:10px">
                 <div class="field">
@@ -1116,6 +1121,15 @@
                   <div class="card-hint" style="margin-top:4px">
                     <template v-if="toolboxAsr.models_cached && toolboxAsr.models_cached[toolboxAsr.model]">✓ 模型已下载</template>
                     <template v-else>⚠ 首次使用需下载模型（后台进行，可等待）</template>
+                  </div>
+                  <!-- 模型下载进度 -->
+                  <div v-if="toolboxAsr.download && toolboxAsr.download.active" style="margin-top:6px">
+                    <div class="progress-wrap" style="height:8px">
+                      <div class="progress-inner" :style="{width: asrDlPercent + '%'}"></div>
+                    </div>
+                    <div class="card-hint" style="margin-top:4px">
+                      正在下载模型：{{ asrDlText }}（{{ asrDlPercent }}%）
+                    </div>
                   </div>
                 </div>
               </div>

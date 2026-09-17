@@ -67,23 +67,36 @@ def collect_files(folder: str, kind: str = KIND_VIDEO) -> list[str]:
     return files
 
 
-def probe_duration(path: str) -> float:
-    """探测视频/音频时长（秒）。失败返回 0。"""
-    ff = ffprobe_path()
-    if not ff:
-        return 0.0
+def _probe_info(path: str) -> str:
+    """用 ffmpeg 自身解析媒体信息（imageio_ffmpeg 不保证带 ffprobe）。
+
+    返回 stderr 文本（ffmpeg -i 无输出参数时退出码非 0，但 stderr 含流信息）。
+    """
+    ff = ffmpeg_path()
+    if not ff or not os.path.isfile(ff):
+        return ""
     try:
         out = subprocess.run(
-            [ff, "-v", "error", "-show_entries", "format=duration",
-             "-of", "default=noprint_wrappers=1:nokey=1", path],
+            [ff, "-hide_banner", "-i", path],
             capture_output=True, text=True, timeout=30,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        if out.returncode == 0 and out.stdout.strip():
-            return float(out.stdout.strip())
+        return out.stderr or ""
     except Exception:
-        pass
-    return 0.0
+        return ""
+
+
+def probe_duration(path: str) -> float:
+    """探测视频/音频时长（秒）。失败返回 0。"""
+    txt = _probe_info(path)
+    m = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.?\d*)", txt)
+    if not m:
+        return 0.0
+    try:
+        h, mi, s = int(m.group(1)), int(m.group(2)), float(m.group(3))
+        return h * 3600 + mi * 60 + s
+    except Exception:
+        return 0.0
 
 
 def _probe_size(path: str) -> tuple[int, int]:
@@ -105,6 +118,12 @@ def _probe_size(path: str) -> tuple[int, int]:
     except Exception:
         pass
     return 0, 0
+
+
+def has_audio(path: str) -> bool:
+    """探测文件是否含音频流（whisper 前必须先查，无音轨直接跳过，避免内部崩溃）。"""
+    txt = _probe_info(path)
+    return bool(re.search(r"Audio:\s*\w+", txt))
 
 
 def _unique_dst(folder: str, stem: str, suffix: str) -> str:

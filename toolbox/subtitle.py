@@ -251,6 +251,42 @@ def process_video(video_path: str, segments: list[dict], style: str,
     return dst
 
 
+def burn_with_style(src: str, srt_path: str, dst: str, style: str = DEFAULT_STYLE,
+                    cancel: Optional[Callable[[], bool]] = None,
+                    encode_accel: str = "auto") -> None:
+    """生成页联动：SRT → 按样式模板生成 ASS → 烧录。
+
+    :param src: 成片视频路径
+    :param srt_path: 现有 SRT 字幕文件（subtitle_plugin 产物）
+    :param style: minimal/outline/bubble/danmaku
+    :param encode_accel: auto 或 nvenc（GPU 加速时字幕步也用 GPU，避免慢）
+    """
+    if style not in _STYLES:
+        raise SubtitleError(f"未知字幕样式：{style}")
+    segs = parse_srt(Path(srt_path).read_text(encoding="utf-8", errors="replace"))
+    if not segs:
+        raise SubtitleError("SRT 中没有有效字幕")
+    ass = build_ass(segs, style)
+    out_dir = Path(dst).parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ass_rel = "_tbx_subtitle.ass"
+    ass_path = out_dir / ass_rel
+    ass_path.write_text(ass, encoding="utf-8-sig")
+    try:
+        vcodec = "h264_nvenc" if str(encode_accel).lower() == "nvenc" else "libx264"
+        args = ["-y", "-i", src, "-vf", f"ass={ass_rel}",
+                "-c:v", vcodec]
+        if vcodec == "libx264":
+            args += ["-preset", "medium"]
+        args += ["-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", dst]
+        engine.run_ffmpeg(args, cancel, cwd=str(out_dir))
+    finally:
+        try:
+            ass_path.unlink()
+        except OSError:
+            pass
+
+
 def index_burn_videos(folder: str, style: str, out_dir: str,
                       cancel: Optional[Callable[[], bool]] = None,
                       progress: Optional[Callable[[int, int, str, str], None]] = None) -> dict:
