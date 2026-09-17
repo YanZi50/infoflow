@@ -371,7 +371,7 @@ class AppState:
                 "toolbox_asr": dict(self.toolbox_asr),
                 "toolbox_sub": dict(self.toolbox_sub),
                 "toolbox_vad": dict(self.toolbox_vad),
-                "toolbox_tts": dict(self.toolbox_tts),
+                "toolbox_tts": self._toolbox_tts_status(),
                 "portable": bool(getattr(sys, "frozen", False)),
                 "failed_items": self.result.failed_items if self.result else [],
                 "success_items": _with_sizes(self.result.success_items) if self.result else [],
@@ -391,6 +391,20 @@ class AppState:
                 data["speed_per_sec"] = rate
                 data["eta_seconds"] = (total - current) / rate
         return data
+
+    def _toolbox_tts_status(self) -> dict:
+        """AI 配音状态（含音色表/依赖可用性，供前端轮询直接渲染下拉）。"""
+        st = dict(self.toolbox_tts)
+        try:
+            from toolbox import tts as tts_mod
+            st["voices"] = tts_mod.available_voices()
+            st["voice_names"] = {v: tts_mod.VOICES[v]["name"] for v in tts_mod.VOICES}
+            st["deps_ok"] = tts_mod.deps_ok()
+        except Exception:  # noqa: BLE001 依赖缺失时前端显示空下拉+提示
+            st.setdefault("voices", [])
+            st.setdefault("voice_names", {})
+            st["deps_ok"] = False
+        return st
 
     def _last_config_preview(self) -> dict | None:
         """本次/上次任务的参数快照（前端展示用，精选字段）。"""

@@ -16,6 +16,7 @@
 - **模型预置**：`models/tts/`（女声 77MB + 男声 131MB + espeak-ng-data 17MB，约 226MB，随包分发免下载）；aishell3（8000Hz 电话音质）与 MeloTTS（需额外 BERT）调研后弃用
 - **修复 sherpa-onnx 1.13.8 三个 API 差异**：VitsModelConfig 不收 rule_fsts/sid（sid 移到 generate）；OfflineTtsConfig 不收 num_threads；**generate 返回 float（-1~1）需乘 32767 转 int16**（此前直接截断导致全静音，已修复并真机验证音量 -20.8dB）
 - **真机验证**：女/男声合成 ✓；API run→done ✓；UI Tab 合成 ✓；配音替代（补静音 19.4s + 截断 60s→19.4s）✓；带配音完整试片 38.8s（前段语音 -23.8dB / 后段静音 -42dB）✓；70 项单测全过 ✓
+- **修复**：AI 配音音色下拉为空——页面轮询用的 `/api/status` 聚合缺 voices/voice_names/deps_ok，前端下拉只在未调用的 ttsRefreshStatus 填充；已改为 `_toolbox_tts_status()` 在状态聚合时实时带出，下拉即时渲染
 
 ## 2026-09-17（R91：识别模型预置进项目——首次使用不再下载，随便携版打包）
 
