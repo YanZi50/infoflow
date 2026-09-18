@@ -1,8 +1,12 @@
 """工具箱-剪气口：silero-vad 静音段检测 + ffmpeg 拼接去停顿。
 
 - 输入：口播/人声视频（音乐、纯画面素材请勿使用——无语音时无法判定）
-- 参数：灵敏度（VAD 阈值）、最短静音（>=此长度才剪，默认 0.6s）、保留句间留白（默认 0.3s）
-- 实现：silero-vad（onnx）逐帧说话概率 → 合并/过滤得语音段 → 保留前后留白 → ffmpeg 拼接
+- 参数（5 项）：灵敏度、最小静音、前垫片、后垫片、最长静音上限
+- 切分规则（前后端一致，见 compute_cuts）：
+    静音间隔 < min_silence        → 合并为同一语音段
+    min_silence ≤ 间隔 ≤ max_silence → 作为剪切点
+    间隔 > max_silence            → 视为有意停顿，合并保留（不剪）
+- analyze_pauses：预览模式，VAD 只推理一次返回 probs+waveform，前端本地重算切分点（拖动参数零延迟）
 - 所有 ffmpeg 调用走 toolbox/engine.py 封装；trim 时间值为纯数字，无注入风险
 
 依赖：onnxruntime + silero-vad（pip install silero-vad，模型约 2.2MB）
@@ -72,21 +76,31 @@ def _read_wav(path: str) -> np.ndarray:
     return data
 
 
-def vad_speech_segments(audio: np.ndarray, threshold: float = 0.5,
-                        min_speech: float = 0.25, min_silence: float = 0.3) -> list[tuple[float, float]]:
-    """silero-vad 逐帧说话概率 → 语音段时间轴（已合并小间隔、过滤短段）。
+def _load_audio(video_path: str, tmp_dir: str,
+                cancel: Optional[Callable[[], bool]] = None) -> np.ndarray:
+    """提取并读取 16k 单声道音频（调用方负责清理 tmp_wav）。"""
+    tmp_wav = str(Path(tmp_dir) / "_vad_tmp.wav")
+    os.makedirs(tmp_dir, exist_ok=True)
+    try:
+        _extract_wav(video_path, tmp_wav, cancel)
+        if cancel and cancel():
+            raise VadError("已取消")
+        return _read_wav(tmp_wav)
+    finally:
+        try:
+            os.unlink(tmp_wav)
+        except OSError:
+            pass
 
-    :param threshold: 说话概率阈值（灵敏度，0.3~0.7）
-    :param min_speech: 最短语音段（秒），过短丢弃
-    :param min_silence: 最短静音（秒），间隔小于此值合并为同一段
-    """
+
+def vad_probs(audio: np.ndarray) -> list[float]:
+    """silero-vad 逐帧说话概率（每 512 样本 / 32ms 一点），不做任何切分。"""
     sess = _session()
     sr_in = np.array([SR], dtype=np.int64)
     state = np.zeros((2, 1, 128), dtype=np.float32)
     context = np.zeros(64, dtype=np.float32)   # context_size=64 (16k)，与官方 OnnxWrapper 一致
     probs: list[float] = []
     n = len(audio)
-    # 逐窗口推理：输入 = context(64) + 窗口(512) = 576；state 由模型管理
     for step in range(0, n, WINDOW):
         frame = audio[step:step + WINDOW]
         if len(frame) < WINDOW:
@@ -99,13 +113,22 @@ def vad_speech_segments(audio: np.ndarray, threshold: float = 0.5,
         })
         probs.append(float(out[0][0]))
         context = chunk[-64:]
+    return probs
 
-    # 1) 滞后阈值切分语音段（进入需 >= threshold，退出需 < threshold-0.15，抑制抖动）
+
+def segments_from_probs(probs: list[float], threshold: float = 0.5,
+                        min_speech: float = 0.25) -> list[tuple[float, float]]:
+    """概率序列 → 原始语音段（阈值滞后切分 + 短段过滤，不做间隔合并）。
+
+    :param threshold: 说话概率阈值（灵敏度，0.2~0.9，越低越敏感）
+    :param min_speech: 最短语音段（秒），过短丢弃
+    """
+    n = len(probs)
+    win_t = WINDOW / SR
     neg_threshold = max(threshold - 0.15, 0.01)
     raw: list[tuple[float, float]] = []
     triggered = False
     start = 0.0
-    win_t = WINDOW / SR
     for i, p in enumerate(probs):
         t = i * win_t
         if not triggered and p >= threshold:
@@ -115,62 +138,104 @@ def vad_speech_segments(audio: np.ndarray, threshold: float = 0.5,
             triggered = False
             raw.append((start, t))
     if triggered:
-        raw.append((start, n / SR))
+        raw.append((start, n * win_t))
+    return [(s, e) for s, e in raw if e - s >= min_speech]
 
-    # 2) 合并小间隔 + 丢弃短段
+
+def compute_cuts(segs: list[tuple[float, float]], dur: float,
+                 min_silence: float = 0.6, max_silence: float = 5.0,
+                 pad_before: float = 0.3, pad_after: float = 0.3) -> list[tuple[float, float]]:
+    """统一切分规则（后端正式剪 & 前端预览重算必须一致）。
+
+    :param segs: 原始语音段（segments_from_probs 输出，未做间隔合并）
+    :param dur: 音频总时长（秒）
+    :param min_silence: 最短静音（秒），间隔达到才剪
+    :param max_silence: 最长静音上限（秒），间隔超过视为有意停顿不剪（合并保留）
+    :param pad_before: 剪切点前保留留白（秒）
+    :param pad_after: 剪切点后保留留白（秒）
+    :return: 保留段列表 [(start, end), ...]
+    """
+    # 1) 间隔合并/切分
     merged: list[tuple[float, float]] = []
-    for s, e in raw:
-        if merged and s - merged[-1][1] < min_silence:
-            merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+    for s, e in segs:
+        if merged:
+            gap = s - merged[-1][1]
+            if gap < min_silence or gap > max_silence:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+            else:
+                merged.append((s, e))
         else:
             merged.append((s, e))
-    return [(s, e) for s, e in merged if e - s >= min_speech]
+    # 2) 前后留白（pad）+ 重叠合并
+    padded: list[tuple[float, float]] = []
+    for s, e in merged:
+        ps, pe = max(0.0, s - pad_before), min(dur, e + pad_after)
+        if padded and ps <= padded[-1][1]:
+            padded[-1] = (padded[-1][0], max(padded[-1][1], pe))
+        else:
+            padded.append((ps, pe))
+    return padded
 
 
-def cut_pauses(video_path: str, out_dir: str,
-               sensitivity: float = 0.5, min_silence: float = 0.6, keep_pad: float = 0.3,
-               cancel: Optional[Callable[[], bool]] = None) -> str:
-    """剪掉口播视频中的长静音，输出拼接后的连续视频。
+def analyze_pauses(video_path: str, sensitivity: float = 0.5, min_silence: float = 0.6,
+                   max_silence: float = 5.0, pad_before: float = 0.3, pad_after: float = 0.3,
+                   cancel: Optional[Callable[[], bool]] = None) -> dict:
+    """预览模式：只分析不输出，返回前端重算所需数据。
 
-    :param sensitivity: VAD 灵敏度（0.3~0.7，越低越敏感）
-    :param min_silence: 最短静音长度（秒），达到才剪
-    :param keep_pad: 保留句间留白（秒），每段前后各保留
-    :return: 输出文件路径
+    - VAD 只推理一次；切分点由前端本地重算（拖动参数零延迟）
+    - waveform：min-max 包络降采样 ~600 点，供 canvas 画波形
+    - cuts：按当前参数算好的保留段（初始展示用，前端拖动参数后本地重算）
     """
     if not Path(video_path).is_file():
         raise VadError(f"文件不存在：{video_path}")
     if not engine.has_audio(video_path):
         raise VadError("该视频没有音轨（纯画面素材），无法剪气口")
+
+    audio = _load_audio(video_path, str(Path(video_path).parent), cancel)
+    dur = len(audio) / SR
+    probs = vad_probs(audio)
+    segs = segments_from_probs(probs, sensitivity, min_speech=0.25)
+    cuts = compute_cuts(segs, dur, min_silence, max_silence, pad_before, pad_after)
+
+    # min-max 包络降采样（画波形用）
+    n_bins = 600
+    wf: list[float] = []
+    if len(audio):
+        step = max(1, len(audio) // n_bins)
+        for i in range(0, len(audio), step):
+            wf.append(float(np.max(np.abs(audio[i:i + step]))))
+    if not wf:
+        wf = [0.0]
+    return {"dur": dur, "probs": probs, "waveform": wf, "sr": SR, "win": WINDOW / SR,
+            "cuts": cuts, "segs": segs}
+
+
+def cut_pauses(video_path: str, out_dir: str,
+               sensitivity: float = 0.5, min_silence: float = 0.6,
+               pad_before: float = 0.3, pad_after: float = 0.3, max_silence: float = 5.0,
+               cancel: Optional[Callable[[], bool]] = None) -> str:
+    """剪掉口播视频中的长静音，输出拼接后的连续视频。
+
+    :param sensitivity: VAD 灵敏度（0.2~0.9，越低越敏感）
+    :param min_silence: 最短静音长度（秒），达到才剪
+    :param pad_before: 剪切点前保留留白（秒）
+    :param pad_after: 剪切点后保留留白（秒）
+    :param max_silence: 最长静音上限（秒），超过视为有意停顿不剪
+    :return: 输出文件路径
+    """
     sensitivity = max(0.2, min(0.9, float(sensitivity)))
     min_silence = max(0.1, min(10.0, float(min_silence)))
-    keep_pad = max(0.0, min(3.0, float(keep_pad)))
+    pad_before = max(0.0, min(3.0, float(pad_before)))
+    pad_after = max(0.0, min(3.0, float(pad_after)))
+    max_silence = max(1.0, min(30.0, float(max_silence)))
 
-    tmp_wav = str(Path(out_dir) / "_vad_tmp.wav")
-    os.makedirs(out_dir, exist_ok=True)
-    try:
-        _extract_wav(video_path, tmp_wav, cancel)
-        if cancel and cancel():
-            raise VadError("已取消")
-        audio = _read_wav(tmp_wav)
-    finally:
-        try:
-            os.unlink(tmp_wav)
-        except OSError:
-            pass
-
-    segs = vad_speech_segments(audio, sensitivity, min_speech=0.25, min_silence=min_silence)
+    audio = _load_audio(video_path, out_dir, cancel)
+    dur = len(audio) / SR
+    probs = vad_probs(audio)
+    segs = segments_from_probs(probs, sensitivity, min_speech=0.25)
     if not segs:
         raise VadError("未检测到语音（音乐/纯噪声/音量过低？），请确认素材是口播人声")
-
-    # 每段前后保留留白（pad），重叠段合并
-    dur = len(audio) / SR
-    padded: list[tuple[float, float]] = []
-    for s, e in segs:
-        ps, pe = max(0.0, s - keep_pad), min(dur, e + keep_pad)
-        if padded and ps <= padded[-1][1]:
-            padded[-1] = (padded[-1][0], max(padded[-1][1], pe))
-        else:
-            padded.append((ps, pe))
+    padded = compute_cuts(segs, dur, min_silence, max_silence, pad_before, pad_after)
 
     stem = Path(video_path).stem
     dst = engine._unique_dst(out_dir, f"{stem}_剪气口", ".mp4")
@@ -204,8 +269,69 @@ def _concat_segments(src: str, segs: list[tuple[float, float]], dst: str,
     ], cancel)
 
 
+def _preview_audio_segments(video_path: str, mode: str, sensitivity: float, min_silence: float,
+                            max_silence: float, pad_before: float, pad_after: float,
+                            cancel: Optional[Callable[[], bool]] = None) -> list[tuple[float, float]]:
+    """试听用片段：
+    - orig: 第一处剪切点附近的静音片段（前 2s ~ 后 2s，约 4s），听"被剪掉的停顿"
+    - cut:  前 3 个保留段各取开头 2s 拼接（约 6s），听"剪后效果"
+    """
+    audio = _load_audio(video_path, str(Path(video_path).parent), cancel)
+    dur = len(audio) / SR
+    probs = vad_probs(audio)
+    segs = segments_from_probs(probs, sensitivity, min_speech=0.25)
+    cuts = compute_cuts(segs, dur, min_silence, max_silence, pad_before, pad_after)
+
+    if mode == "orig":
+        # 找第一个真正的剪切点（相邻保留段之间的空隙）
+        for i in range(1, len(cuts)):
+            gap_s, gap_e = cuts[i - 1][1], cuts[i][0]
+            if gap_e - gap_s >= min_silence:
+                mid = (gap_s + gap_e) / 2
+                s, e = max(0.0, mid - 2.0), min(dur, mid + 2.0)
+                return [(s, e)]
+        return []
+    # cut 模式：前 3 个保留段各取 2s
+    out: list[tuple[float, float]] = []
+    for s, e in cuts[:3]:
+        out.append((s, min(e, s + 2.0)))
+    return out
+
+
+def preview_audio(video_path: str, out_mp3: str, mode: str = "cut", sensitivity: float = 0.5,
+                  min_silence: float = 0.6, max_silence: float = 5.0,
+                  pad_before: float = 0.3, pad_after: float = 0.3,
+                  cancel: Optional[Callable[[], bool]] = None) -> str:
+    """生成试听音频（mp3）到 out_mp3，返回路径。mode: orig=被剪停顿 / cut=剪后效果。"""
+    segs = _preview_audio_segments(video_path, mode, sensitivity, min_silence,
+                                   max_silence, pad_before, pad_after, cancel)
+    if not segs:
+        raise VadError("未找到可试听片段")
+    if len(segs) == 1:
+        s, e = segs[0]
+        engine.run_ffmpeg(["-y", "-i", video_path, "-ss", f"{s:.3f}", "-t", f"{e - s:.3f}",
+                           "-vn", "-c:a", "libmp3lame", "-q:a", "5", out_mp3], cancel)
+    else:
+        _concat_audio_segments(video_path, segs, out_mp3, cancel)
+    return out_mp3
+
+
+def _concat_audio_segments(src: str, segs: list[tuple[float, float]], dst: str,
+                           cancel: Optional[Callable[[], bool]] = None) -> None:
+    """多段音频拼接为 mp3（试听用，不重编码视频）。"""
+    n = len(segs)
+    parts = [f"[0:a]atrim=start={s:.3f}:end={e:.3f},asetpts=PTS-STARTPTS[a{i}]"
+             for i, (s, e) in enumerate(segs)]
+    fc = ";".join(parts)
+    fc += ";" + "".join(f"[a{i}]" for i in range(n))
+    fc += f"concat=n={n}:v=0:a=1[a]"
+    engine.run_ffmpeg(["-y", "-i", src, "-filter_complex", fc, "-map", "[a]",
+                       "-c:a", "libmp3lame", "-q:a", "5", dst], cancel)
+
+
 def cut_batch(folder: str, out_dir: str,
-              sensitivity: float = 0.5, min_silence: float = 0.6, keep_pad: float = 0.3,
+              sensitivity: float = 0.5, min_silence: float = 0.6,
+              pad_before: float = 0.3, pad_after: float = 0.3, max_silence: float = 5.0,
               cancel: Optional[Callable[[], bool]] = None,
               progress: Optional[Callable[[int, int, str, str], None]] = None) -> dict:
     """批量剪气口：文件夹内所有视频。"""
@@ -221,7 +347,8 @@ def cut_batch(folder: str, out_dir: str,
                 progress(i, total, f, "stop")
             break
         try:
-            cut_pauses(f, out_dir, sensitivity, min_silence, keep_pad, cancel)
+            cut_pauses(f, out_dir, sensitivity, min_silence, pad_before, pad_after,
+                       max_silence, cancel)
             ok += 1
             if progress:
                 progress(i, total, f, "ok")

@@ -1318,10 +1318,22 @@
                   <div class="card-hint">达到该长度才剪（当前 {{ toolboxVad.min_silence.toFixed(1) }}s，双击恢复 0.6s）</div>
                 </div>
                 <div class="field">
-                  <div class="field-label">保留句间留白（秒）</div>
-                  <input type="range" min="0" max="1" step="0.05" v-model.number="toolboxVad.keep_pad"
-                         style="width:100%" @dblclick="toolboxVad.keep_pad=0.3">
-                  <div class="card-hint">每段前后保留（当前 {{ toolboxVad.keep_pad.toFixed(2) }}s，双击恢复 0.30s）</div>
+                  <div class="field-label">前垫片（秒）</div>
+                  <input type="range" min="0" max="1" step="0.05" v-model.number="toolboxVad.pad_before"
+                         style="width:100%" @dblclick="toolboxVad.pad_before=0.3">
+                  <div class="card-hint">剪切点前保留（当前 {{ toolboxVad.pad_before.toFixed(2) }}s，双击恢复 0.30s）</div>
+                </div>
+                <div class="field">
+                  <div class="field-label">后垫片（秒）</div>
+                  <input type="range" min="0" max="1" step="0.05" v-model.number="toolboxVad.pad_after"
+                         style="width:100%" @dblclick="toolboxVad.pad_after=0.3">
+                  <div class="card-hint">剪切点后保留（当前 {{ toolboxVad.pad_after.toFixed(2) }}s，双击恢复 0.30s）</div>
+                </div>
+                <div class="field">
+                  <div class="field-label">最长静音上限（秒）</div>
+                  <input type="range" min="1" max="15" step="0.5" v-model.number="toolboxVad.max_silence"
+                         style="width:100%" @dblclick="toolboxVad.max_silence=5">
+                  <div class="card-hint">超过此时长视为有意停顿不剪（当前 {{ toolboxVad.max_silence.toFixed(1) }}s，双击恢复 5s）</div>
                 </div>
 
                 <div class="field" style="grid-column:1/-1">
@@ -1347,6 +1359,9 @@
 
               <div class="btn-row" style="margin-top:14px">
                 <button class="btn" @click="vadRun" :disabled="toolboxVad.running">开始剪气口</button>
+                <button class="btn plain" @click="vadPreview" :disabled="toolboxVad.running || toolboxVad.previewLoading">
+                  {{ toolboxVad.previewLoading ? '分析中…' : '预览检测' }}
+                </button>
                 <button v-if="toolboxVad.running" class="btn plain" @click="vadCancel">取消</button>
                 <button class="btn plain" @click="vadOpenOut" :disabled="!toolboxVad.out_dir">打开输出目录</button>
               </div>
@@ -1379,6 +1394,34 @@
 
               <div class="card-hint" style="margin-top:12px">
                 提示：仅对口播/人声素材有效。音乐、纯画面（无声）、纯噪声素材会提示失败，不影响其他视频继续处理。
+              </div>
+
+              <!-- 剪气口预览弹层 -->
+              <div v-if="toolboxVad.previewShow" class="preview-overlay" @click.self="vadPreviewClose">
+                <div class="preview-panel">
+                  <div class="preview-head">
+                    <span class="preview-title">剪气口预览 · {{ toolboxVad.previewFile ? (toolboxVad.previewFile.split(/[\\\\/]/).pop()) : '' }}</span>
+                    <button class="btn plain" @click="vadPreviewClose">关闭</button>
+                  </div>
+                  <div class="preview-stats">
+                    <div class="pstat"><span class="pstat-label">原时长</span><span class="pstat-num">{{ vadFmtTime(toolboxVad.previewDur) }}</span></div>
+                    <div class="pstat"><span class="pstat-label">剪后时长</span><span class="pstat-num">{{ vadFmtTime(toolboxVad.previewCutDur) }}</span></div>
+                    <div class="pstat"><span class="pstat-label">剪掉</span><span class="pstat-num danger-text">{{ toolboxVad.previewCutCount }} 段 · {{ vadFmtTime(toolboxVad.previewCutTotal) }}</span></div>
+                    <div class="pstat"><span class="pstat-label">保留率</span><span class="pstat-num">{{ toolboxVad.previewKeepPct }}%</span></div>
+                  </div>
+                  <div class="preview-wave-wrap">
+                    <canvas ref="vadCanvas" class="preview-canvas"></canvas>
+                    <div class="preview-time-axis" ref="vadTimeAxis"></div>
+                  </div>
+                  <div class="preview-audio-row">
+                    <audio ref="vadAudio" controls style="width:100%"></audio>
+                  </div>
+                  <div class="preview-audio-btns">
+                    <button class="btn plain" @click="vadPreviewPlay('cut')">试听剪后效果</button>
+                    <button class="btn plain" @click="vadPreviewPlay('orig')">试听被剪停顿</button>
+                    <span class="card-hint">拖动上方参数滑块可实时看到剪切点变化（本地重算，不重复分析）</span>
+                  </div>
+                </div>
               </div>
             </div>
 

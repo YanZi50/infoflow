@@ -621,7 +621,8 @@ def _segments_to_text(segments) -> str:
 
 
 def _toolbox_vad_worker(target: str, out_dir: str, sensitivity: float,
-                        min_silence: float, keep_pad: float, single_file: bool) -> None:
+                        min_silence: float, pad_before: float, pad_after: float,
+                        max_silence: float, single_file: bool) -> None:
     from toolbox import vad_cut
 
     def progress(i: int, total: int, f: str, status: str) -> None:
@@ -633,13 +634,15 @@ def _toolbox_vad_worker(target: str, out_dir: str, sensitivity: float,
     STATE.toolbox_vad["last_status"] = "running"
     try:
         if single_file:
-            dst = vad_cut.cut_pauses(target, out_dir, sensitivity, min_silence, keep_pad,
+            dst = vad_cut.cut_pauses(target, out_dir, sensitivity, min_silence,
+                                     pad_before, pad_after, max_silence,
                                      lambda: STATE.toolbox_vad.get("cancel"))
             STATE.toolbox_vad.update({"ok": 1, "skipped": 0, "failed": 0, "errors": [],
                                       "total": 1, "current": 1, "current_file": Path(target).name})
             STATE.toolbox_vad["stage"] = "done"
         else:
-            res = vad_cut.cut_batch(target, out_dir, sensitivity, min_silence, keep_pad,
+            res = vad_cut.cut_batch(target, out_dir, sensitivity, min_silence,
+                                    pad_before, pad_after, max_silence,
                                     lambda: STATE.toolbox_vad.get("cancel"), progress)
             STATE.toolbox_vad.update({
                 "ok": res["ok"], "skipped": res["skipped"], "failed": res["failed"],
@@ -1033,6 +1036,9 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/api/toolbox/vad/status":
             self._send_json(dict(STATE.toolbox_vad))
             return
+        if route == "/api/toolbox/vad/preview_audio":
+            self._toolbox_vad_preview_audio()
+            return
         if route == "/api/toolbox/tts/status":
             from toolbox import tts as tts_mod
             st = dict(STATE.toolbox_tts)
@@ -1357,6 +1363,9 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/api/toolbox/vad/status":
             self._send_json(dict(STATE.toolbox_vad))
             return
+        if route == "/api/toolbox/vad/preview_audio":
+            self._toolbox_vad_preview_audio()
+            return
         if route == "/api/toolbox/vad/run":
             self._toolbox_vad_run()
             return
@@ -1367,6 +1376,10 @@ class Handler(BaseHTTPRequestHandler):
             STATE.toolbox_vad["cancel"] = True
             self._send_json({"ok": True})
             return
+        if route == "/api/toolbox/vad/preview":
+            self._toolbox_vad_preview()
+            return
+
         if route == "/api/toolbox/tts/run":
             self._toolbox_tts_run()
             return
@@ -1608,6 +1621,80 @@ class Handler(BaseHTTPRequestHandler):
                          args=(text, voice, speed, out_dir, service_url), daemon=True).start()
         self._send_json({"ok": True, "out_dir": out_dir})
 
+    def _toolbox_vad_preview(self) -> None:
+        """剪气口预览：单文件 VAD 分析，返回波形+概率序列（不做任何输出）。"""
+        from toolbox import vad_cut
+        payload = self._read_json()
+        video = str(payload.get("video") or "").strip()
+        if not video or not os.path.isfile(video):
+            # 调试：记录收到的路径（定位前端路径损坏问题）
+            try:
+                with open(os.path.join(os.path.dirname(__file__), "logs", "_preview_debug.log"), "a", encoding="utf-8") as _dbg:
+                    _dbg.write(f"video={video!r} isfile={os.path.isfile(video)}\n")
+            except OSError:
+                pass
+            self._send_json({"ok": False, "error": "请选择有效的视频文件"}, 400)
+            return
+        sensitivity = float(payload.get("sensitivity") or 0.5)
+        min_silence = float(payload.get("min_silence") or 0.6)
+        pad_before = float(payload.get("pad_before") or 0.3)
+        pad_after = float(payload.get("pad_after") or 0.3)
+        max_silence = float(payload.get("max_silence") or 5.0)
+        try:
+            data = vad_cut.analyze_pauses(video, sensitivity, min_silence,
+                                          max_silence, pad_before, pad_after)
+        except vad_cut.VadError as e:
+            self._send_json({"ok": False, "error": str(e)}, 400)
+            return
+        except Exception as e:  # noqa: BLE001
+            self._send_json({"ok": False, "error": f"分析失败：{e}"}, 400)
+            return
+        self._send_json({"ok": True, "dur": data["dur"], "probs": data["probs"],
+                         "waveform": data["waveform"], "win": data["win"],
+                         "cuts": data["cuts"]})
+
+    def _toolbox_vad_preview_audio(self) -> None:
+        """剪气口试听：orig=被剪停顿附近 / cut=剪后前段拼接，返回 mp3 流。"""
+        from toolbox import vad_cut
+        query = parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
+        def q(k: str, d: str = "") -> str:
+            v = (query.get(k) or [""])[0]
+            return v if v else d
+        video = q("file")
+        mode = q("mode", "cut")
+        if not video or not os.path.isfile(video):
+            self._send_json({"ok": False, "error": "文件不存在"}, 400)
+            return
+        try:
+            sensitivity = float(q("sensitivity", "0.5"))
+            min_silence = float(q("min_silence", "0.6"))
+            pad_before = float(q("pad_before", "0.3"))
+            pad_after = float(q("pad_after", "0.3"))
+            max_silence = float(q("max_silence", "5.0"))
+        except ValueError:
+            self._send_json({"ok": False, "error": "参数无效"}, 400)
+            return
+        tmp_dir = os.path.join(tempfile.gettempdir(), "infoflow_preview")
+        os.makedirs(tmp_dir, exist_ok=True)
+        # 清理过期试听缓存（最多保留 10 个）
+        try:
+            olds = sorted(Path(tmp_dir).glob("prev_*.mp3"), key=lambda f: f.stat().st_mtime, reverse=True)
+            for f in olds[10:]:
+                f.unlink(missing_ok=True)
+        except OSError:
+            pass
+        out_mp3 = os.path.join(tmp_dir, f"prev_{mode}_{os.getpid()}_{int(time.time() * 1000)}.mp3")
+        try:
+            vad_cut.preview_audio(video, out_mp3, mode, sensitivity, min_silence,
+                                  max_silence, pad_before, pad_after)
+        except vad_cut.VadError as e:
+            self._send_json({"ok": False, "error": str(e)}, 400)
+            return
+        except Exception as e:  # noqa: BLE001
+            self._send_json({"ok": False, "error": f"试听生成失败：{e}"}, 400)
+            return
+        self._send_file(Path(out_mp3), "audio/mpeg")
+
     def _toolbox_vad_run(self) -> None:
         """批量模式：文件夹内视频剪气口。"""
         if STATE.toolbox_vad.get("running"):
@@ -1623,19 +1710,23 @@ class Handler(BaseHTTPRequestHandler):
             return
         sensitivity = float(payload.get("sensitivity") or 0.5)
         min_silence = float(payload.get("min_silence") or 0.6)
-        keep_pad = float(payload.get("keep_pad") or 0.3)
+        pad_before = float(payload.get("pad_before") or 0.3)
+        pad_after = float(payload.get("pad_after") or 0.3)
+        max_silence = float(payload.get("max_silence") or 5.0)
         out_dir = str(payload.get("out_dir") or "").strip()
         if not out_dir:
             self._send_json({"ok": False, "error": "请先选择输出目录"}, 400)
             return
         STATE.toolbox_vad.update({
             "running": True, "stage": "running", "mode": "folder",
-            "sensitivity": sensitivity, "min_silence": min_silence, "keep_pad": keep_pad,
+            "sensitivity": sensitivity, "min_silence": min_silence,
+            "pad_before": pad_before, "pad_after": pad_after, "max_silence": max_silence,
             "current": 0, "total": 0, "current_file": "", "ok": 0, "skipped": 0,
             "failed": 0, "errors": [], "cancel": False, "out_dir": out_dir, "error": None,
         })
         threading.Thread(target=_toolbox_vad_worker,
-                         args=(folder, out_dir, sensitivity, min_silence, keep_pad, False), daemon=True).start()
+                         args=(folder, out_dir, sensitivity, min_silence, pad_before, pad_after,
+                               max_silence, False), daemon=True).start()
         self._send_json({"ok": True, "out_dir": out_dir})
 
     def _toolbox_vad_run_file(self) -> None:
@@ -1649,23 +1740,33 @@ class Handler(BaseHTTPRequestHandler):
         payload = self._read_json()
         video = str(payload.get("video") or "").strip()
         if not video or not os.path.isfile(video):
+            # 调试：记录收到的路径（定位前端路径损坏问题）
+            try:
+                with open(os.path.join(os.path.dirname(__file__), "logs", "_preview_debug.log"), "a", encoding="utf-8") as _dbg:
+                    _dbg.write(f"video={video!r} isfile={os.path.isfile(video)}\n")
+            except OSError:
+                pass
             self._send_json({"ok": False, "error": "请选择有效的视频文件"}, 400)
             return
         sensitivity = float(payload.get("sensitivity") or 0.5)
         min_silence = float(payload.get("min_silence") or 0.6)
-        keep_pad = float(payload.get("keep_pad") or 0.3)
+        pad_before = float(payload.get("pad_before") or 0.3)
+        pad_after = float(payload.get("pad_after") or 0.3)
+        max_silence = float(payload.get("max_silence") or 5.0)
         out_dir = str(payload.get("out_dir") or "").strip()
         if not out_dir:
             self._send_json({"ok": False, "error": "请先选择输出目录"}, 400)
             return
         STATE.toolbox_vad.update({
             "running": True, "stage": "running", "mode": "file",
-            "sensitivity": sensitivity, "min_silence": min_silence, "keep_pad": keep_pad,
+            "sensitivity": sensitivity, "min_silence": min_silence,
+            "pad_before": pad_before, "pad_after": pad_after, "max_silence": max_silence,
             "current": 0, "total": 1, "current_file": Path(video).name, "ok": 0, "skipped": 0,
             "failed": 0, "errors": [], "cancel": False, "out_dir": out_dir, "error": None,
         })
         threading.Thread(target=_toolbox_vad_worker,
-                         args=(video, out_dir, sensitivity, min_silence, keep_pad, True), daemon=True).start()
+                         args=(video, out_dir, sensitivity, min_silence, pad_before, pad_after,
+                               max_silence, True), daemon=True).start()
         self._send_json({"ok": True, "out_dir": out_dir})
 
     # ----------------------------------------------------------------

@@ -936,3 +936,20 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .asr-stat { flex: 1; min-width: 120px; text-align: center; padding: 12px 8px; border-radius: 12px; background: color-mix(in srgb, var(--bg-soft) 70%, transparent); border: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
 .asr-stat-num { font-size: 22px; font-weight: 800; font-family: var(--font-mono); color: var(--accent); }
 .asr-stat-label { font-size: 11px; color: var(--text-3); margin-top: 4px; }
+
+/* 工具箱-剪气口预览弹层 */
+.preview-overlay { position: fixed; inset: 0; z-index: 999; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); backdrop-filter: blur(4px); padding: 24px; }
+.preview-panel { width: min(860px, 96vw); background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 20px; box-shadow: 0 20px 60px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 14px; }
+.preview-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.preview-title { font-size: 15px; font-weight: 700; }
+.preview-stats { display: flex; gap: 10px; flex-wrap: wrap; }
+.pstat { flex: 1; min-width: 110px; text-align: center; padding: 10px 6px; border-radius: 12px; background: color-mix(in srgb, var(--bg-soft) 70%, transparent); border: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+.pstat-num { font-size: 19px; font-weight: 800; font-family: var(--font-mono); color: var(--accent); }
+.pstat-label { font-size: 11px; color: var(--text-3); margin-top: 3px; }
+.danger-text { color: var(--danger) !important; }
+.preview-wave-wrap { position: relative; }
+.preview-canvas { width: 100%; height: 150px; border-radius: 10px; background: rgba(0,0,0,.25); display: block; }
+.preview-time-axis { position: relative; height: 16px; margin-top: 2px; }
+.paxis-tick { position: absolute; transform: translateX(-50%); font-size: 10px; font-family: var(--font-mono); color: var(--text-3); }
+.preview-audio-row { }
+.preview-audio-btns { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

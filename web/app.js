@@ -37,7 +37,7 @@ const state = reactive({
   toolbox: { running: false, stage: 'idle', tool: '', current: 0, total: 0, current_file: '', results: [], cancel: false, out_dir: '', error: null },
   toolboxAsr: { running: false, stage: 'idle', folder: '', model: 'small', current: 0, total: 0, current_file: '', done: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, index_stats: null, models_cached: {}, download: null, last_status: '' },
   toolboxSub: { running: false, stage: 'idle', mode: 'folder', style: 'minimal', folder: '', video: '', sub_file: '', out_dir: '', current: 0, total: 0, current_file: '', ok: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, last_status: '' },
-  toolboxVad: { running: false, stage: 'idle', mode: 'folder', sensitivity: 0.5, min_silence: 0.6, keep_pad: 0.3, folder: '', video: '', out_dir: '', current: 0, total: 0, current_file: '', ok: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, last_status: '' },
+  toolboxVad: { running: false, stage: 'idle', mode: 'folder', sensitivity: 0.5, min_silence: 0.6, pad_before: 0.3, pad_after: 0.3, max_silence: 5.0, folder: '', video: '', out_dir: '', current: 0, total: 0, current_file: '', ok: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, last_status: '', previewShow: false, previewLoading: false, previewFile: '', previewDur: 0, previewProbs: [], previewWave: [], previewWin: 0.032, previewSegs: [], previewCuts: [], previewCutDur: 0, previewCutCount: 0, previewCutTotal: 0, previewKeepPct: 0 },
   toolboxTts: { running: false, stage: 'idle', voice: 'female', speed: 1.0, text: '', text_len: 0, current: 0, total: 0, out_path: '', out_dir: '', error: null, cancel: false, voices: [], voice_names: {}, deps_ok: true, service_url: '' },
   toolboxMatch: { running: false, stage: 'idle', text: '', text_len: 0, current: 0, total: 0, out_path: '', out_burned: '', report: [], videos_used: 0, matched: 0, out_dir: '', burn_style: 'minimal', error: null, cancel: false, deps_ok: true, index_count: 0, last_log: '' },
   toolboxUI: {
@@ -967,12 +967,12 @@ async function vadRun() {
   let body;
   if (state.toolboxVad.mode === 'folder') {
     if (!state.toolboxVad.folder) { showMsg('请先选择素材文件夹', 'error'); return; }
-    body = { folder: state.toolboxVad.folder, sensitivity: state.toolboxVad.sensitivity, min_silence: state.toolboxVad.min_silence, keep_pad: state.toolboxVad.keep_pad, out_dir: state.toolboxVad.out_dir };
+    body = { folder: state.toolboxVad.folder, sensitivity: state.toolboxVad.sensitivity, min_silence: state.toolboxVad.min_silence, pad_before: state.toolboxVad.pad_before, pad_after: state.toolboxVad.pad_after, max_silence: state.toolboxVad.max_silence, out_dir: state.toolboxVad.out_dir };
     const r = await api('/api/toolbox/vad/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!r || !r.ok) { showMsg((r && r.error) || '启动失败', 'error'); return; }
   } else {
     if (!state.toolboxVad.video) { showMsg('请先选择视频文件', 'error'); return; }
-    body = { video: state.toolboxVad.video, sensitivity: state.toolboxVad.sensitivity, min_silence: state.toolboxVad.min_silence, keep_pad: state.toolboxVad.keep_pad, out_dir: state.toolboxVad.out_dir };
+    body = { video: state.toolboxVad.video, sensitivity: state.toolboxVad.sensitivity, min_silence: state.toolboxVad.min_silence, pad_before: state.toolboxVad.pad_before, pad_after: state.toolboxVad.pad_after, max_silence: state.toolboxVad.max_silence, out_dir: state.toolboxVad.out_dir };
     const r = await api('/api/toolbox/vad/run_file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!r || !r.ok) { showMsg((r && r.error) || '启动失败', 'error'); return; }
   }
@@ -987,6 +987,196 @@ async function vadCancel() {
 
 function vadOpenOut() {
   if (state.toolboxVad.out_dir) api('/api/open_folder?folder=' + encodeURIComponent(state.toolboxVad.out_dir));
+}
+
+/* ---------- 剪气口预览：VAD 分析一次 + 前端本地重算切分（零延迟拖动） ---------- */
+
+// 本地重算：概率序列 → 原始语音段（与后端 segments_from_probs 一致）
+function vadSegments(probs, winT, threshold, minSpeech) {
+  const neg = Math.max(threshold - 0.15, 0.01);
+  const raw = [];
+  let triggered = false, start = 0;
+  for (let i = 0; i < probs.length; i++) {
+    const t = i * winT;
+    if (!triggered && probs[i] >= threshold) { triggered = true; start = t; }
+    else if (triggered && probs[i] < neg) { triggered = false; raw.push([start, t]); }
+  }
+  if (triggered) raw.push([start, probs.length * winT]);
+  return raw.filter((x) => x[1] - x[0] >= minSpeech);
+}
+
+// 本地重算：语音段 → 保留段（与后端 compute_cuts 一致）
+function vadCuts(segs, dur, minSilence, maxSilence, padBefore, padAfter) {
+  const merged = [];
+  for (const [s, e] of segs) {
+    if (merged.length) {
+      const gap = s - merged[merged.length - 1][1];
+      if (gap < minSilence || gap > maxSilence) merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], e);
+      else merged.push([s, e]);
+    } else merged.push([s, e]);
+  }
+  const padded = [];
+  for (const [s, e] of merged) {
+    const ps = Math.max(0, s - padBefore), pe = Math.min(dur, e + padAfter);
+    if (padded.length && ps <= padded[padded.length - 1][1]) padded[padded.length - 1][1] = Math.max(padded[padded.length - 1][1], pe);
+    else padded.push([ps, pe]);
+  }
+  return padded;
+}
+
+async function vadPreview() {
+  const v = state.toolboxVad.mode === 'file' ? state.toolboxVad.video : state.toolboxVad.folder;
+  if (!v) { showMsg(state.toolboxVad.mode === 'file' ? '请先选择视频文件' : '请先选择素材文件夹', 'error'); return; }
+  if (state.toolboxVad.mode === 'folder') { showMsg('预览检测仅支持单文件：请切换到"单文件：一个视频"模式', 'error'); return; }
+  state.toolboxVad.previewLoading = true;
+  try {
+    const body = {
+      video: v, sensitivity: state.toolboxVad.sensitivity, min_silence: state.toolboxVad.min_silence,
+      pad_before: state.toolboxVad.pad_before, pad_after: state.toolboxVad.pad_after, max_silence: state.toolboxVad.max_silence,
+    };
+    const r = await api('/api/toolbox/vad/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r || !r.ok) { showMsg((r && r.error) || '预览失败', 'error'); return; }
+    state.toolboxVad.previewFile = v;
+    state.toolboxVad.previewDur = r.dur;
+    state.toolboxVad.previewProbs = r.probs || [];
+    state.toolboxVad.previewWave = r.waveform || [];
+    state.toolboxVad.previewWin = r.win || 0.032;
+    state.toolboxVad.previewSegs = vadSegments(state.toolboxVad.previewProbs, state.toolboxVad.previewWin, state.toolboxVad.sensitivity, 0.25);
+    state.toolboxVad.previewCuts = vadCuts(state.toolboxVad.previewSegs, state.toolboxVad.previewDur, state.toolboxVad.min_silence, state.toolboxVad.max_silence, state.toolboxVad.pad_before, state.toolboxVad.pad_after);
+    state.toolboxVad.previewShow = true;
+    await Vue.nextTick();          // 等面板 DOM 渲染完成再画波形
+    vadPreviewRecompute();         // 算统计 + 绘制（含 150ms 防抖）
+  } catch (e) { showMsg('预览失败：' + e.message, 'error'); }
+  finally { state.toolboxVad.previewLoading = false; }
+}
+
+function vadPreviewClose() {
+  state.toolboxVad.previewShow = false;
+  const a = document.querySelector('.preview-panel audio');
+  if (a) a.pause();
+}
+
+function vadPreviewPlay(mode) {
+  const a = document.querySelector('.preview-panel audio');
+  if (!a) return;
+  const v = state.toolboxVad.previewFile;
+  if (!v) return;
+  const p = state.toolboxVad;
+  const q = new URLSearchParams({
+    file: v, mode,
+    sensitivity: p.sensitivity, min_silence: p.min_silence,
+    pad_before: p.pad_before, pad_after: p.pad_after, max_silence: p.max_silence,
+  });
+  a.src = '/api/toolbox/vad/preview_audio?' + q.toString();
+  a.play().catch(() => {});
+}
+
+function vadFmtTime(sec) {
+  if (!isFinite(sec) || sec < 0) return '0:00';
+  const s = Math.round(sec);
+  const m = Math.floor(s / 60);
+  return m > 0 ? m + ':' + String(s % 60).padStart(2, '0') : '0:' + String(s).padStart(2, '0');
+}
+
+// 波形绘制：波形 + 静音色块 + 剪切线 + 时间轴
+let _vadDrawTimer = null;
+function vadPreviewRender() {
+  clearTimeout(_vadDrawTimer);
+  _vadDrawTimer = setTimeout(() => {
+    const canvas = document.querySelector('.preview-canvas');
+    if (!canvas) return;
+    const p = state.toolboxVad;
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    if (w < 50 || h < 20) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, w, h);
+    const mid = h / 2, dur = p.previewDur || 1;
+    const wave = p.previewWave || [];
+    const cuts = p.previewCuts || [];
+
+    // 静音被剪区间（保留段之间的空隙）
+    const cutRanges = [];
+    for (let i = 1; i < cuts.length; i++) cutRanges.push([cuts[i - 1][1], cuts[i][0]]);
+
+    // 背景
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(0, 0, w, h);
+
+    // 被剪区间灰显底色
+    ctx.fillStyle = 'rgba(255,80,80,0.14)';
+    for (const [s, e] of cutRanges) {
+      const x1 = (s / dur) * w, x2 = (e / dur) * w;
+      ctx.fillRect(x1, 0, Math.max(1, x2 - x1), h);
+    }
+
+    // 波形（min-max 包络，对称绘制）
+    const n = wave.length;
+    const step = Math.max(1, Math.floor(n / w));
+    ctx.strokeStyle = 'rgba(120,200,255,0.9)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = 0; x < w; x++) {
+      let mx = 0;
+      const i0 = Math.floor((x / w) * n), i1 = Math.min(n, i0 + step + 1);
+      for (let i = i0; i < i1; i++) mx = Math.max(mx, wave[i] || 0);
+      const amp = Math.max(0.5, mx * mid * 0.95);
+      ctx.moveTo(x, mid - amp);
+      ctx.lineTo(x, mid + amp);
+    }
+    ctx.stroke();
+
+    // 剪切线（保留段边界）
+    ctx.strokeStyle = 'rgba(255,180,60,0.95)';
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    for (const [s, e] of cuts) {
+      const x1 = (s / dur) * w, x2 = (e / dur) * w;
+      ctx.moveTo(x1, 0); ctx.lineTo(x1, h);
+      ctx.moveTo(x2, 0); ctx.lineTo(x2, h);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 时间刻度
+    const axis = document.querySelector('.preview-time-axis');
+    if (axis) {
+      axis.innerHTML = '';
+      const ticks = Math.min(8, Math.max(2, Math.floor(dur / 5) + 1));
+      for (let i = 0; i <= ticks; i++) {
+        const t = (dur * i) / ticks;
+        const span = document.createElement('span');
+        span.className = 'paxis-tick';
+        span.style.left = ((t / dur) * 100) + '%';
+        span.textContent = vadFmtTime(t);
+        axis.appendChild(span);
+      }
+    }
+  }, 30);
+}
+
+// 参数变化 → 本地重算 + 重绘（防抖 150ms）
+let _vadWatchTimer = null;
+function vadPreviewRecompute() {
+  clearTimeout(_vadWatchTimer);
+  _vadWatchTimer = setTimeout(() => {
+    if (!state.toolboxVad.previewShow || !state.toolboxVad.previewProbs.length) return;
+    const p = state.toolboxVad;
+    p.previewSegs = vadSegments(p.previewProbs, p.previewWin, p.sensitivity, 0.25);
+    p.previewCuts = vadCuts(p.previewSegs, p.previewDur, p.min_silence, p.max_silence, p.pad_before, p.pad_after);
+    // 统计
+    let cutTotal = 0, keepTotal = 0;
+    for (let i = 1; i < p.previewCuts.length; i++) cutTotal += p.previewCuts[i][0] - p.previewCuts[i - 1][1];
+    for (const cs of p.previewCuts) keepTotal += cs[1] - cs[0];
+    p.previewCutDur = keepTotal;
+    p.previewCutCount = Math.max(0, p.previewCuts.length - 1);
+    p.previewCutTotal = Math.max(0, cutTotal);
+    p.previewKeepPct = p.previewDur ? Math.round((keepTotal / p.previewDur) * 100) : 0;
+    vadPreviewRender();
+  }, 150);
 }
 
 const vadProgress = computed(() => {
@@ -1667,6 +1857,14 @@ createApp({
           healthTimer = setTimeout(() => precheck(true), 800);
         }
       );
+      // 剪气口预览参数变化 → 本地重算切分 + 重绘（零延迟，不重复 VAD 推理）
+      watch(
+        () => [
+          state.toolboxVad.sensitivity, state.toolboxVad.min_silence,
+          state.toolboxVad.pad_before, state.toolboxVad.pad_after, state.toolboxVad.max_silence,
+        ],
+        () => vadPreviewRecompute()
+      );
       // 轮询：页面可见时每秒拉取状态；切到后台/隐藏时暂停，切回立即刷新——省 CPU 与网络
       let pollTimer = null;
       function startPoll() {
@@ -1709,6 +1907,7 @@ createApp({
       asrRun, asrCancel, asrClear, asrSelectFolder, asrProgress, asrStats, asrDurationText, asrModelText, asrDlPercent, asrDlText,
       subSelectMain, subSelectFile, subSelectOut, subRun, subCancel, subOpenOut, subProgress,
       vadSelectMain, vadSelectOut, vadRun, vadCancel, vadOpenOut, vadProgress,
+      vadPreview, vadPreviewClose, vadPreviewPlay, vadFmtTime, vadPreviewRecompute,
       ttsRefreshStatus, ttsSelectOut, ttsImportAsr, ttsRun, ttsCancel, ttsOpenOut, ttsOpenFile, ttsProgress,
       matVol, setMatVol,
       selectPoolFolder, addMiddlePool, removeMiddlePool, scanPool,
