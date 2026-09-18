@@ -749,7 +749,7 @@ function toolboxParams() {
 async function toolboxRun() {
   if (state.toolbox.running) return;
   if (!state.toolboxUI.folder) { showMsg('请先选择输入文件夹', 'error'); return; }
-  if (!state.toolboxUI.out_dir) { showMsg('请先选择工具箱输出目录', 'error'); return; }
+  if (!state.toolboxUI.out_dir) { showMsg('请先选择输出目录', 'error'); return; }
   const payload = {
     tool: state.toolboxUI.tool,
     folder: state.toolboxUI.folder,
@@ -882,19 +882,18 @@ async function subSelectOut() {
 
 async function subRun() {
   if (state.toolboxSub.running) return;
+  if (!state.toolboxSub.out_dir) { showMsg('请先选择输出目录', 'error'); return; }
   let body;
   if (state.toolboxSub.mode === 'folder') {
     if (!state.toolboxSub.folder) { showMsg('请先选择素材文件夹', 'error'); return; }
     body = { folder: state.toolboxSub.folder, style: state.toolboxSub.style, out_dir: state.toolboxSub.out_dir };
     const r = await api('/api/toolbox/sub/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!r || !r.ok) { showMsg((r && r.error) || '启动失败', 'error'); return; }
-    if (!state.toolboxSub.out_dir && r.out_dir) state.toolboxSub.out_dir = r.out_dir;
   } else {
     if (!state.toolboxSub.video) { showMsg('请先选择视频文件', 'error'); return; }
     body = { video: state.toolboxSub.video, sub_file: state.toolboxSub.sub_file, style: state.toolboxSub.style, out_dir: state.toolboxSub.out_dir };
     const r = await api('/api/toolbox/sub/run_file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!r || !r.ok) { showMsg((r && r.error) || '启动失败', 'error'); return; }
-    if (!state.toolboxSub.out_dir && r.out_dir) state.toolboxSub.out_dir = r.out_dir;
   }
   showMsg('字幕烧录任务已启动', 'info');
 }
@@ -947,19 +946,18 @@ async function vadSelectOut() {
 
 async function vadRun() {
   if (state.toolboxVad.running) return;
+  if (!state.toolboxVad.out_dir) { showMsg('请先选择输出目录', 'error'); return; }
   let body;
   if (state.toolboxVad.mode === 'folder') {
     if (!state.toolboxVad.folder) { showMsg('请先选择素材文件夹', 'error'); return; }
     body = { folder: state.toolboxVad.folder, sensitivity: state.toolboxVad.sensitivity, min_silence: state.toolboxVad.min_silence, keep_pad: state.toolboxVad.keep_pad, out_dir: state.toolboxVad.out_dir };
     const r = await api('/api/toolbox/vad/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!r || !r.ok) { showMsg((r && r.error) || '启动失败', 'error'); return; }
-    if (!state.toolboxVad.out_dir && r.out_dir) state.toolboxVad.out_dir = r.out_dir;
   } else {
     if (!state.toolboxVad.video) { showMsg('请先选择视频文件', 'error'); return; }
     body = { video: state.toolboxVad.video, sensitivity: state.toolboxVad.sensitivity, min_silence: state.toolboxVad.min_silence, keep_pad: state.toolboxVad.keep_pad, out_dir: state.toolboxVad.out_dir };
     const r = await api('/api/toolbox/vad/run_file', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!r || !r.ok) { showMsg((r && r.error) || '启动失败', 'error'); return; }
-    if (!state.toolboxVad.out_dir && r.out_dir) state.toolboxVad.out_dir = r.out_dir;
   }
   showMsg('剪气口任务已启动', 'info');
 }
@@ -1023,6 +1021,7 @@ async function matchRun() {
   if (state.toolboxMatch.running) return;
   const text = (state.toolboxMatch.text || '').trim();
   if (!text) { showMsg('请输入要匹配的文案', 'error'); return; }
+  if (!state.toolboxMatch.out_dir) { showMsg('请先选择输出目录', 'error'); return; }
   if (!state.toolboxMatch.deps_ok) { showMsg('语义模型未就绪（models/bge-small-zh-v1.5）', 'error'); return; }
   try {
     const r = await apiFetch('/api/toolbox/match/run', {
@@ -1048,6 +1047,7 @@ async function ttsRun() {
   if (state.toolboxTts.running) return;
   const text = (state.toolboxTts.text || '').trim();
   if (!text) { showMsg('请输入要合成的文本', 'error'); return; }
+  if (!state.toolboxTts.out_dir) { showMsg('请先选择输出目录', 'error'); return; }
   const remote = (state.toolboxTts.service_url || '').trim();
   if (!remote && !state.toolboxTts.deps_ok) { showMsg('配音依赖（sherpa-onnx）未就绪，请填写远程配音服务地址', 'error'); return; }
   const body = {

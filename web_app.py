@@ -1478,8 +1478,10 @@ class Handler(BaseHTTPRequestHandler):
         from toolbox.subtitle import STYLE_NAMES
         if style not in STYLE_NAMES:
             style = "minimal"
-        import video_engine
-        out_dir = str(payload.get("out_dir") or "").strip() or os.path.join(video_engine._app_root(), "toolbox_export", "字幕包装")
+        out_dir = str(payload.get("out_dir") or "").strip()
+        if not out_dir:
+            self._send_json({"ok": False, "error": "请先选择输出目录"}, 400)
+            return
         STATE.toolbox_sub.update({
             "running": True, "stage": "running", "mode": "folder", "style": style,
             "current": 0, "total": 0, "current_file": "", "ok": 0, "skipped": 0,
@@ -1506,8 +1508,10 @@ class Handler(BaseHTTPRequestHandler):
         from toolbox.subtitle import STYLE_NAMES
         if style not in STYLE_NAMES:
             style = "minimal"
-        import video_engine
-        out_dir = str(payload.get("out_dir") or "").strip() or os.path.join(video_engine._app_root(), "toolbox_export", "字幕包装")
+        out_dir = str(payload.get("out_dir") or "").strip()
+        if not out_dir:
+            self._send_json({"ok": False, "error": "请先选择输出目录"}, 400)
+            return
         STATE.toolbox_sub.update({
             "running": True, "stage": "running", "mode": "file", "style": style,
             "current": 0, "total": 1, "current_file": Path(video).name, "ok": 0, "skipped": 0,
@@ -1529,8 +1533,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         out_dir = str(payload.get("out_dir") or "").strip()
         if not out_dir:
-            import video_engine
-            out_dir = os.path.join(video_engine._app_root(), "toolbox_export", "文本匹配")
+            self._send_json({"ok": False, "error": "请先选择输出目录"}, 400)
+            return
         os.makedirs(out_dir, exist_ok=True)
         burn_style = str(payload.get("burn_style") or "minimal")
         STATE.toolbox_match.update({
@@ -1557,8 +1561,10 @@ class Handler(BaseHTTPRequestHandler):
         speed = float(payload.get("speed") or 1.0)
         speed = max(0.5, min(2.0, speed))
         service_url = str(payload.get("service_url") or "").strip()
-        import video_engine
-        out_dir = str(payload.get("out_dir") or "").strip() or os.path.join(video_engine._app_root(), "toolbox_export", "AI配音")
+        out_dir = str(payload.get("out_dir") or "").strip()
+        if not out_dir:
+            self._send_json({"ok": False, "error": "请先选择输出目录"}, 400)
+            return
         os.makedirs(out_dir, exist_ok=True)
         STATE.toolbox_tts.update({
             "running": True, "stage": "running", "voice": voice, "speed": speed,
@@ -1582,8 +1588,10 @@ class Handler(BaseHTTPRequestHandler):
         sensitivity = float(payload.get("sensitivity") or 0.5)
         min_silence = float(payload.get("min_silence") or 0.6)
         keep_pad = float(payload.get("keep_pad") or 0.3)
-        import video_engine
-        out_dir = str(payload.get("out_dir") or "").strip() or os.path.join(video_engine._app_root(), "toolbox_export", "剪气口")
+        out_dir = str(payload.get("out_dir") or "").strip()
+        if not out_dir:
+            self._send_json({"ok": False, "error": "请先选择输出目录"}, 400)
+            return
         STATE.toolbox_vad.update({
             "running": True, "stage": "running", "mode": "folder",
             "sensitivity": sensitivity, "min_silence": min_silence, "keep_pad": keep_pad,
@@ -1607,8 +1615,10 @@ class Handler(BaseHTTPRequestHandler):
         sensitivity = float(payload.get("sensitivity") or 0.5)
         min_silence = float(payload.get("min_silence") or 0.6)
         keep_pad = float(payload.get("keep_pad") or 0.3)
-        import video_engine
-        out_dir = str(payload.get("out_dir") or "").strip() or os.path.join(video_engine._app_root(), "toolbox_export", "剪气口")
+        out_dir = str(payload.get("out_dir") or "").strip()
+        if not out_dir:
+            self._send_json({"ok": False, "error": "请先选择输出目录"}, 400)
+            return
         STATE.toolbox_vad.update({
             "running": True, "stage": "running", "mode": "file",
             "sensitivity": sensitivity, "min_silence": min_silence, "keep_pad": keep_pad,

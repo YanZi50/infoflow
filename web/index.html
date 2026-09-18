@@ -967,9 +967,9 @@
                     </div>
                   </div>
                   <div class="field">
-                    <div class="field-label">输出目录</div>
+                    <div class="field-label">输出目录 <b style="color:var(--danger)">* 必选</b></div>
                     <div class="folder-row">
-                      <input class="input input-path" placeholder="选择工具箱输出目录" v-model="toolboxUI.out_dir">
+                      <input class="input input-path" placeholder="选择输出目录（必选）" v-model="toolboxUI.out_dir">
                       <button class="btn plain" @click="toolboxSelect('out')" :disabled="selectBusy">选择</button>
                     </div>
                   </div>
@@ -1242,9 +1242,9 @@
                   </div>
                 </div>
                 <div class="field" style="grid-column:1/-1">
-                  <div class="field-label">输出目录（留空默认：程序目录/toolbox_export/字幕包装）</div>
+                  <div class="field-label">输出目录 <b style="color:var(--danger)">* 必选</b></div>
                   <div class="folder-row">
-                    <input class="input input-path" placeholder="选择输出目录（可选）" v-model="toolboxSub.out_dir">
+                    <input class="input input-path" placeholder="选择输出目录（必选）" v-model="toolboxSub.out_dir">
                     <button class="btn plain" @click="subSelectOut" :disabled="selectBusy">选择</button>
                   </div>
                 </div>
@@ -1333,9 +1333,9 @@
                   </div>
                 </div>
                 <div class="field" style="grid-column:1/-1">
-                  <div class="field-label">输出目录（留空默认：程序目录/toolbox_export/剪气口）</div>
+                  <div class="field-label">输出目录 <b style="color:var(--danger)">* 必选</b></div>
                   <div class="folder-row">
-                    <input class="input input-path" placeholder="选择输出目录（可选）" v-model="toolboxVad.out_dir">
+                    <input class="input input-path" placeholder="选择输出目录（必选）" v-model="toolboxVad.out_dir">
                     <button class="btn plain" @click="vadSelectOut" :disabled="selectBusy">选择</button>
                   </div>
                 </div>
@@ -1411,9 +1411,9 @@
                   <div class="card-hint">当前 {{ toolboxTts.speed.toFixed(2) }}x（双击滑杆恢复 1.0x）</div>
                 </div>
                 <div class="field" style="grid-column:1/-1">
-                  <div class="field-label">输出目录（留空默认：程序目录/toolbox_export/AI配音）</div>
+                  <div class="field-label">输出目录 <b style="color:var(--danger)">* 必选</b></div>
                   <div class="folder-row">
-                    <input class="input input-path" placeholder="选择输出目录（可选）" v-model="toolboxTts.out_dir">
+                    <input class="input input-path" placeholder="选择输出目录（必选）" v-model="toolboxTts.out_dir">
                     <button class="btn plain" @click="ttsSelectOut" :disabled="selectBusy">选择</button>
                   </div>
                 </div>
@@ -1468,9 +1468,9 @@
                     placeholder="输入要成片的文案，例如：&#10;大家好，今天给大家分享一个提高效率的方法。&#10;第一，先做最重要的事。&#10;第二，把大任务拆成小步骤。"></textarea>
                 </div>
                 <div class="field" style="grid-column:1/-1">
-                  <div class="field-label">输出目录（留空默认：程序目录/toolbox_export/文本匹配）</div>
+                  <div class="field-label">输出目录 <b style="color:var(--danger)">* 必选</b></div>
                   <div class="folder-row">
-                    <input class="input input-path" placeholder="选择输出目录（可选）" v-model="toolboxMatch.out_dir">
+                    <input class="input input-path" placeholder="选择输出目录（必选）" v-model="toolboxMatch.out_dir">
                     <button class="btn plain" @click="matchSelectOut" :disabled="selectBusy">选择</button>
                   </div>
                 </div>
