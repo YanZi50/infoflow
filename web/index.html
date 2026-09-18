@@ -48,8 +48,8 @@
 
         <div class="sidebar-foot">
           <div class="health-badge">
-            <span class="health-dot" :class="{off: !serverOk}"></span>
-            {{ serverOk ? '服务已连接' : '服务连接失败' }}
+            <span class="health-dot" :class="serverOk === null ? 'connecting' : {off: !serverOk}"></span>
+            {{ serverOk === null ? '正在连接服务…' : (serverOk ? '服务已连接' : '服务连接失败') }}
           </div>
           <div v-if="updateInfo && updateInfo.has_update" class="update-hint" style="display:flex; flex-direction:column; gap:6px; align-items:flex-start; border:1px solid var(--accent-soft); border-radius:8px; padding:8px 10px; background:var(--bg-soft)">
             <div style="font-weight:700; color:var(--accent)">发现新版本 {{ updateInfo.latest }}</div>
@@ -813,7 +813,7 @@
               </div>
 
               <div class="progress-wrap">
-                <div class="progress-inner" :style="{width: progressPct+'%'}"></div>
+                <div class="progress-inner" :class="progressState" :style="{width: progressPct+'%'}"></div>
               </div>
               <div class="job-stats" v-if="job.running || job.done">
                 <span>进度 <b>{{ job.current }}/{{ job.total }}</b>（{{ progressPct }}%）</span>
@@ -1087,7 +1087,7 @@
                 <!-- 进度 -->
                 <div v-if="toolbox.total > 0" style="margin-top:14px">
                   <div class="progress-wrap">
-                    <div class="progress-inner" :style="{width: toolboxProgress + '%'}"></div>
+                    <div class="progress-inner" :class="stageClass(toolboxUI.stage)" :style="{width: toolboxProgress + '%'}"></div>
                   </div>
                   <div class="progress-info">
                     <span v-if="toolbox.running">处理中 {{ toolbox.current }}/{{ toolbox.total }} · {{ toolbox.current_file }}</span>
@@ -1154,7 +1154,7 @@
               <!-- 进度 -->
               <div v-if="toolboxAsr.total > 0 || toolboxAsr.running" style="margin-top:14px">
                 <div class="progress-wrap">
-                  <div class="progress-inner" :style="{width: asrProgress + '%'}"></div>
+                  <div class="progress-inner" :class="stageClass(toolboxAsr.stage)" :style="{width: asrProgress + '%'}"></div>
                 </div>
                 <div class="progress-info">
                   <span v-if="toolboxAsr.running && toolboxAsr.last_status==='loading'">正在加载/下载识别模型，首次较慢…</span>
@@ -1259,7 +1259,7 @@
               <!-- 进度 -->
               <div v-if="toolboxSub.total > 0 || toolboxSub.running" style="margin-top:14px">
                 <div class="progress-wrap">
-                  <div class="progress-inner" :style="{width: subProgress + '%'}"></div>
+                  <div class="progress-inner" :class="stageClass(toolboxSub.stage)" :style="{width: subProgress + '%'}"></div>
                 </div>
                 <div class="progress-info">
                   <span v-if="toolboxSub.running && toolboxSub.mode==='file'">正在烧录…</span>
@@ -1350,7 +1350,7 @@
               <!-- 进度 -->
               <div v-if="toolboxVad.total > 0 || toolboxVad.running" style="margin-top:14px">
                 <div class="progress-wrap">
-                  <div class="progress-inner" :style="{width: vadProgress + '%'}"></div>
+                  <div class="progress-inner" :class="stageClass(toolboxVad.stage)" :style="{width: vadProgress + '%'}"></div>
                 </div>
                 <div class="progress-info">
                   <span v-if="toolboxVad.running && toolboxVad.mode==='file'">正在剪气口…</span>
@@ -1436,7 +1436,7 @@
               <!-- 进度 -->
               <div v-if="toolboxTts.total > 0 || toolboxTts.running" style="margin-top:14px">
                 <div class="progress-wrap">
-                  <div class="progress-inner" :style="{width: ttsProgress + '%'}"></div>
+                  <div class="progress-inner" :class="stageClass(toolboxTts.stage)" :style="{width: ttsProgress + '%'}"></div>
                 </div>
                 <div class="progress-info">
                   <span v-if="toolboxTts.running">合成中 {{ toolboxTts.current }}/{{ toolboxTts.total }} 段…</span>

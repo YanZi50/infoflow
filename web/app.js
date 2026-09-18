@@ -9,7 +9,7 @@ const state = reactive({
   step: 1,
   stepErrors: { 1: false, 2: false, 3: false },
   theme: localStorage.getItem('sppj_theme') || 'dark',
-  serverOk: true,
+  serverOk: null,   // null=连接中（启动首帧） / true=已连接 / false=连接失败
   selectBusy: false,
   msg: { text: '', type: 'info' },
   health: null,
@@ -234,6 +234,21 @@ const progressPct = computed(() => {
   if (!state.job.total) return 0;
   return Math.min(100, Math.round((state.job.current / state.job.total) * 100));
 });
+// 进度条状态：running=蓝色动画 / done=绿无动画 / fail=红无动画 / cancel=黄无动画
+function stageClass(stage) {
+  if (stage === 'running') return 'running';
+  if (stage === 'cancelled') return 'cancel';
+  if (stage === 'error') return 'fail';
+  if (stage === 'done') return 'done';
+  return '';
+}
+const progressState = computed(() => {
+  if (state.job.running) return 'running';
+  if (state.job.cancelled) return 'cancel';
+  if (state.job.error || state.job.failed > 0) return 'fail';
+  if (state.job.success > 0 || state.job.total > 0) return 'done';
+  return '';
+});
 const logHtml = computed(() => escapeHtml(state.job.logs.join('\n')));
 const warnsText = computed(() => (state.health && state.health.warns || []).map((w) => w.scope + '：' + w.msg).join('\n'));
 const poolPickedCount = computed(() => state.middlePools.reduce((s, p) => s + p.items.length, 0));
@@ -280,6 +295,9 @@ function goSimPage(p) {
   const max = simPageCount.value;
   state.simPage = Math.max(1, Math.min(p, max));
 }
+
+// 一次性迁移：素材音量改为默认 1 后，历史 localStorage 旧键（sppj_matvol:）不再使用，启动时清理
+try { Object.keys(localStorage).filter(k => k.indexOf('sppj_matvol:') === 0).forEach(k => localStorage.removeItem(k)); } catch (e) { /* 忽略 */ }
 
 /* ---------- 转场预览 ---------- */
 const previewTransClass = computed(() =>
@@ -415,19 +433,15 @@ function collectConfig() {
   };
 }
 
-// 素材音量：响应式 map（实时显示）+ localStorage 持久化；仅收集 ≠1.0 的传给后端
-const VOL_KEY = 'sppj_matvol:';
+// 素材音量：响应式 map（实时显示），默认一律 1.0；仅用户手动拖动改变（本次会话内生效，不持久化）
 function matVol(path) {
   const fromState = state.matVols[path];
-  if (fromState != null) return fromState;
-  const v = parseFloat(localStorage.getItem(VOL_KEY + path));
-  return Number.isFinite(v) ? Math.min(2, Math.max(0, v)) : 1.0;
+  return fromState != null ? fromState : 1.0;
 }
 function setMatVol(path, v) {
   const val = parseFloat(v);
   const clamped = Number.isFinite(val) ? Math.min(2, Math.max(0, val)) : 1.0;
   state.matVols[path] = clamped;   // 响应式更新滑块数值显示
-  localStorage.setItem(VOL_KEY + path, String(clamped));
 }
 function collectMatVolumes() {
   const vols = {};
@@ -759,7 +773,7 @@ async function toolboxClear() {
 }
 
 function toolboxOpenOut() {
-  if (state.toolboxUI.out_dir) api('/api/open_folder', { folder: state.toolboxUI.out_dir });
+  if (state.toolboxUI.out_dir) api('/api/open_folder?folder=' + encodeURIComponent(state.toolboxUI.out_dir));
 }
 
 /* ---------- 工具箱：语音识别与索引 ---------- */
@@ -892,7 +906,7 @@ async function subCancel() {
 }
 
 function subOpenOut() {
-  if (state.toolboxSub.out_dir) api('/api/open_folder', { folder: state.toolboxSub.out_dir });
+  if (state.toolboxSub.out_dir) api('/api/open_folder?folder=' + encodeURIComponent(state.toolboxSub.out_dir));
 }
 
 const subProgress = computed(() => {
@@ -957,7 +971,7 @@ async function vadCancel() {
 }
 
 function vadOpenOut() {
-  if (state.toolboxVad.out_dir) api('/api/open_folder', { folder: state.toolboxVad.out_dir });
+  if (state.toolboxVad.out_dir) api('/api/open_folder?folder=' + encodeURIComponent(state.toolboxVad.out_dir));
 }
 
 const vadProgress = computed(() => {
@@ -1059,11 +1073,11 @@ async function ttsCancel() {
 
 function ttsOpenOut() {
   const p = state.toolboxTts.out_path || state.toolboxTts.out_dir;
-  if (p) api('/api/open_folder', { folder: p });
+  if (p) api('/api/open_folder?folder=' + encodeURIComponent(p));
 }
 
 function ttsOpenFile() {
-  if (state.toolboxTts.out_path) api('/api/open_file', { path: state.toolboxTts.out_path });
+  if (state.toolboxTts.out_path) api('/api/open_file?path=' + encodeURIComponent(state.toolboxTts.out_path));
 }
 
 const ttsProgress = computed(() => {
@@ -1691,6 +1705,7 @@ createApp({
       resumeJob, discardInterrupted,
       downloadZip, Math, openOutputFolder, copyErrorText, fmtSize, currentMaterial,
       previewTransClass, previewTransName,
+      stageClass, progressState,
       visibleRows, resultPageCount, goResultPage,
       visibleSimilar, simPageCount, goSimPage,
       deepDedupeOptions, deepStrengths,

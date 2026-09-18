@@ -494,7 +494,21 @@ def _run_ps_file(script_body: str, timeout: int = 300) -> str:
 
 
 def _toolbox_worker(tool: str, files: list[str], params: dict, out_dir: str) -> None:
-    """工具箱后台线程：逐文件处理，渐进更新 STATE.toolbox。"""
+    """工具箱后台线程：逐文件处理，渐进更新 STATE.toolbox。
+
+    产物按工具功能名写入 out_dir/<工具中文名>/ 子目录（concat/extract_frames 同样），
+    用户一眼可知这批素材用了什么工具。
+    """
+    TOOL_DIR = {
+        "transcode": "转码",
+        "compress": "压缩",
+        "extract_frames": "抽帧",
+        "audio": "音频提取",
+        "clip": "裁剪",
+        "concat": "合并",
+    }
+    out_dir = str(Path(out_dir) / TOOL_DIR.get(tool, tool))
+    os.makedirs(out_dir, exist_ok=True)
     results: list[dict] = []
     total = len(files)
     try:
@@ -1162,7 +1176,7 @@ class Handler(BaseHTTPRequestHandler):
             self._list_output(folder)
             return
         if route == "/api/open_folder":
-            folder = (query.get("folder") or [""])[0]
+            folder = (query.get("folder") or [""])[0] or (self._read_json().get("folder") or "")
             if not folder or not os.path.isdir(folder):
                 self._send_json({"ok": False, "error": "输出目录不存在"}, 404)
                 return
@@ -1172,7 +1186,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:  # noqa: BLE001
                 self._send_json({"ok": False, "error": str(e)})
         if route == "/api/open_file":
-            path = (query.get("path") or [""])[0]
+            path = (query.get("path") or [""])[0] or (self._read_json().get("path") or "")
             if not path or not os.path.isfile(path):
                 self._send_json({"ok": False, "error": "文件不存在"}, 404)
                 return

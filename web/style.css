@@ -172,6 +172,8 @@ body::before {
 }
 .health-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
 .health-dot.off { background: var(--danger); }
+.health-dot.connecting { background: #f59e0b; animation: dot-pulse 1.2s ease-in-out infinite; }
+@keyframes dot-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 .update-hint {
   display: inline-block; margin-top: 6px; padding: 2px 8px; font-size: 11px;
   font-weight: 600; color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, transparent);
@@ -625,7 +627,15 @@ input[type="range"]::-webkit-slider-thumb {
   content: ""; position: absolute; inset: 0;
   background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent);
   animation: shimmer 1.6s infinite;
+  opacity: 0;                      /* 默认无动画：仅进行中显示流光 */
 }
+.progress-inner.running::after { opacity: 1; }
+.progress-inner.done { background: #22c55e; }          /* 完成：绿，无动画 */
+.progress-inner.fail { background: #ef4444; }          /* 失败：红，无动画 */
+.progress-inner.cancel { background: #f59e0b; }        /* 取消/终止：黄，无动画 */
+.progress-inner.done::after,
+.progress-inner.fail::after,
+.progress-inner.cancel::after { opacity: 0; animation: none; }
 @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
 .job-stats { display: flex; gap: var(--space-4); flex-wrap: wrap; font-size: 12.5px; color: var(--text-2); }
 .job-stats b { color: var(--text); font-family: var(--font-mono); }
