@@ -112,7 +112,7 @@
 
               <div class="folder-row">
                 <input class="input input-path" :id="'input_' + zone.kind" :placeholder="zone.placeholder"
-                       v-model="folders[zone.kind]" @change="scan(zone.kind)">
+                       v-model="folders[zone.kind]" @change="scan(zone.kind)" @keydown.enter="scan(zone.kind)">
                 <span class="folder-count" v-if="materials[zone.kind].length">
                   {{ materials[zone.kind].length }} 个
                 </span>
@@ -186,7 +186,7 @@
                 </div>
                 <div class="folder-row">
                   <input class="input input-path" :id="'input_pool_' + pool.id" placeholder="中间素材池文件夹"
-                         v-model="pool.folder" @change="scanPool(pool)">
+                         v-model="pool.folder" @change="scanPool(pool)" @keydown.enter="scanPool(pool)">
                   <span class="folder-count" v-if="pool.files.length">{{ pool.files.length }} 个</span>
                   <button class="btn plain" @click="selectPoolFolder(pool)" :disabled="selectBusy">选择</button>
                 </div>
@@ -286,7 +286,7 @@
               <div class="card-title"><span class="bar"></span>输出目录</div>
               <div class="folder-row">
                 <input class="input input-path" id="input_output" placeholder="成片保存位置（必填）"
-                       v-model="folders.output" @change="scan('output')">
+                       v-model="folders.output" @change="scan('output')" @keydown.enter="scan('output')">
                 <button class="btn plain" @click="selectFolder('output')" :disabled="selectBusy">选择</button>
               </div>
               <div class="card-hint" style="margin-top:8px">
@@ -491,7 +491,7 @@
                 <div class="field">
                   <div class="field-label">音乐文件夹</div>
                   <div class="folder-row">
-                    <input class="input input-path" v-model="folders.bgm" @change="scan('bgm')">
+                    <input class="input input-path" v-model="folders.bgm" @change="scan('bgm')" @keydown.enter="scan('bgm')">
                     <button class="btn plain" @click="selectFolder('bgm')" :disabled="selectBusy">选择</button>
                   </div>
                 </div>
