@@ -17,10 +17,29 @@ _LOCK = threading.Lock()
 # 模型下载进度状态（供前端轮询）：active/n/file/n/total/done/error
 _DL: dict = {"active": False, "model": "", "file": "", "n": 0, "total": 0, "done": False, "error": None}
 
+# 各模型已下载文件大小提示（MB，用于无 tqdm 进度时按目录大小估算）
+WHISPER_SIZE_HINT = {"tiny": 75, "base": 140, "small": 463, "medium": 1520, "large-v3": 1545}
+
 
 def download_state() -> dict:
     """当前模型下载进度快照（复制返回，避免外部篡改）。"""
     return dict(_DL)
+
+
+def whisper_dir_size_mb(name: str) -> int:
+    """模型下载目录已落盘大小（MB）。hf_hub 新版可能不走 tqdm，用目录大小兜底估算进度。"""
+    name = (name or "small").strip()
+    total = 0
+    for sub in (f"models--Systran--faster-whisper-{name}", f"faster-whisper-{name}"):
+        base = models_dir() / sub
+        if base.is_dir():
+            try:
+                for f in base.rglob("*"):
+                    if f.is_file():
+                        total += f.stat().st_size
+            except Exception:
+                pass
+    return total // (1024 * 1024)
 
 
 def data_root() -> Path:

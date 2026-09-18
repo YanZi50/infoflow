@@ -35,7 +35,7 @@ const state = reactive({
   materials: { head: [], tail: [], middle: [], bgm: [] },
   fixed: { head: '', tail: '', middle: '', bgm: '' },
   toolbox: { running: false, stage: 'idle', tool: '', current: 0, total: 0, current_file: '', results: [], cancel: false, out_dir: '', error: null },
-  toolboxAsr: { running: false, stage: 'idle', folder: '', model: 'small', current: 0, total: 0, current_file: '', done: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, index_stats: null, models_cached: {}, download: null, last_status: '' },
+  toolboxAsr: { running: false, stage: 'idle', folder: '', model: 'small', current: 0, total: 0, current_file: '', done: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, index_stats: null, models_cached: {}, download: null, dl_dir_mb: 0, dl_hint_mb: 0, last_status: '' },
   toolboxSub: { running: false, stage: 'idle', mode: 'folder', style: 'minimal', folder: '', video: '', sub_file: '', out_dir: '', current: 0, total: 0, current_file: '', ok: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, last_status: '' },
   toolboxVad: { running: false, stage: 'idle', mode: 'folder', sensitivity: 0.5, min_silence: 0.6, pad_before: 0.3, pad_after: 0.3, max_silence: 5.0, folder: '', video: '', out_dir: '', current: 0, total: 0, current_file: '', ok: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, last_status: '', previewShow: false, previewLoading: false, previewFile: '', previewDur: 0, previewProbs: [], previewWave: [], previewWin: 0.032, previewSegs: [], previewCuts: [], previewCutDur: 0, previewCutCount: 0, previewCutTotal: 0, previewKeepPct: 0 },
   toolboxTts: { running: false, stage: 'idle', voice: 'female', speed: 1.0, text: '', text_len: 0, current: 0, total: 0, out_path: '', out_dir: '', error: null, cancel: false, voices: [], voice_names: {}, deps_ok: true, service_url: '' },
@@ -1638,6 +1638,8 @@ async function poll() {
       state.toolboxAsr.index_stats = s.toolbox_asr.index_stats || null;
       state.toolboxAsr.models_cached = s.toolbox_asr.models_cached || {};
       state.toolboxAsr.download = s.toolbox_asr.download || null;
+      state.toolboxAsr.dl_dir_mb = s.toolbox_asr.dl_dir_mb || 0;
+      state.toolboxAsr.dl_hint_mb = s.toolbox_asr.dl_hint_mb || 0;
     }
     if (s.toolbox_sub) {
       const keep = {

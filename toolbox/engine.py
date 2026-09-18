@@ -78,8 +78,8 @@ def _probe_info(path: str) -> str:
     try:
         out = subprocess.run(
             [ff, "-hide_banner", "-i", path],
-            capture_output=True, text=True, timeout=30,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         return out.stderr or ""
     except Exception:
@@ -100,23 +100,30 @@ def probe_duration(path: str) -> float:
 
 
 def _probe_size(path: str) -> tuple[int, int]:
-    """探测视频宽高，失败返回 (0, 0)。"""
+    """探测视频宽高，失败返回 (0, 0)。便携版无 ffprobe 时用 ffmpeg -i 解析。"""
     ff = ffprobe_path()
-    if not ff:
-        return 0, 0
-    try:
-        out = subprocess.run(
-            [ff, "-v", "error", "-select_streams", "v:0",
-             "-show_entries", "stream=width,height",
-             "-of", "csv=s=x:p=0", path],
-            capture_output=True, text=True, timeout=30,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        if out.returncode == 0 and out.stdout.strip():
-            w, h = out.stdout.strip().split("x", 1)
-            return int(w), int(h)
-    except Exception:
-        pass
+    if ff:
+        try:
+            out = subprocess.run(
+                [ff, "-v", "error", "-select_streams", "v:0",
+                 "-show_entries", "stream=width,height",
+                 "-of", "csv=s=x:p=0", path],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if out.returncode == 0 and out.stdout.strip():
+                w, h = out.stdout.strip().split("x", 1)
+                return int(w), int(h)
+        except Exception:
+            pass
+    # 兜底：ffmpeg -i stderr 里的分辨率
+    txt = _probe_info(path)
+    m = re.search(r"Video:.*?(\d{2,5})x(\d{2,5})", txt)
+    if m:
+        try:
+            return int(m.group(1)), int(m.group(2))
+        except Exception:
+            pass
     return 0, 0
 
 

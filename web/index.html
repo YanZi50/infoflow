@@ -1146,6 +1146,14 @@
                       正在下载模型：{{ asrDlText }}（{{ asrDlPercent }}%）
                     </div>
                   </div>
+                  <div v-else-if="toolboxAsr.running && toolboxAsr.last_status==='loading' && toolboxAsr.dl_hint_mb && toolboxAsr.dl_dir_mb && !(toolboxAsr.models_cached && toolboxAsr.models_cached[toolboxAsr.model])" style="margin-top:6px">
+                    <div class="progress-wrap" style="height:8px">
+                      <div class="progress-inner" :style="{width: Math.min(100, Math.round(toolboxAsr.dl_dir_mb / toolboxAsr.dl_hint_mb * 100)) + '%'}"></div>
+                    </div>
+                    <div class="card-hint" style="margin-top:4px">
+                      正在下载模型：已下载 {{ toolboxAsr.dl_dir_mb }}MB / 约 {{ toolboxAsr.dl_hint_mb }}MB（{{ Math.min(100, Math.round(toolboxAsr.dl_dir_mb / toolboxAsr.dl_hint_mb * 100)) }}%）
+                    </div>
+                  </div>
                 </div>
               </div>
 

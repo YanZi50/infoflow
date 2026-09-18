@@ -699,32 +699,66 @@ def _toolbox_match_worker(text: str, out_dir: str, burn_style: str) -> None:
 
 
 def _toolbox_tts_worker(text: str, voice: str, speed: float, out_dir: str, service_url: str = "") -> None:
-    """AI 配音后台线程：文本合成 wav，进度按段落更新（远程服务时单请求）。"""
-    from toolbox import tts as tts_mod
+    """AI 配音后台线程：拉起独立子进程合成（进程隔离，崩溃不影响主服务）。
+
+    子进程协议：主进程写任务 JSON 到 stdin，子进程写结果 JSON 到 stdout。
+    """
+    import json as _json
+    import subprocess as _sp
 
     def cancel() -> bool:
         return bool(STATE.toolbox_tts.get("cancel"))
 
     STATE.toolbox_tts["stage"] = "running"
+    proc = None
     try:
-        total = 1 if service_url else len(tts_mod._split_text(text))
-        STATE.toolbox_tts["total"] = total
-        out_path = str(Path(out_dir) / f"AI配音_{voice}_{time.strftime('%Y%m%d_%H%M%S')}.wav")
-        path, _ = tts_mod.synthesize(
-            text, voice=voice, speed=speed, out_path=out_path,
-            cancel=cancel,
-            progress=lambda i: STATE.toolbox_tts.update(current=i),
-            service_url=service_url,
+        if getattr(sys, "frozen", False):
+            cmd = [sys.executable, "--tts-worker"]
+        else:
+            cmd = [sys.executable, os.path.abspath(__file__), "--tts-worker"]
+        proc = _sp.Popen(
+            cmd, stdin=_sp.PIPE, stdout=_sp.PIPE, stderr=_sp.DEVNULL,
+            creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0),
         )
-        STATE.toolbox_tts.update({"out_path": path, "current": STATE.toolbox_tts.get("total", 0)})
-        STATE.toolbox_tts["stage"] = "cancelled" if STATE.toolbox_tts.get("cancel") else "done"
-    except tts_mod.TtsError as e:
+        ready = proc.stdout.readline().decode("utf-8", "replace").strip()
+        if not ready:
+            raise tts.TtsError("配音子进程启动失败")
+        task = {"text": text, "voice": voice, "speed": speed,
+                "out_dir": out_dir, "service_url": service_url}
+        proc.stdin.write(_json.dumps(task).encode("utf-8") + b"\n")
+        proc.stdin.flush()
+        proc.stdin.close()
+        line = proc.stdout.readline().decode("utf-8", "replace").strip()
+        if not line:
+            proc.wait(timeout=5)
+            if proc.returncode != 0:
+                raise tts.TtsError("配音子进程异常退出（返回码 %s）" % proc.returncode)
+            raise tts.TtsError("配音子进程无输出")
+        result = _json.loads(line)
+        if result.get("ok"):
+            STATE.toolbox_tts.update({
+                "out_path": result["path"], "current": 1, "total": 1,
+            })
+            STATE.toolbox_tts["stage"] = "cancelled" if cancel() else "done"
+        else:
+            raise tts.TtsError(str(result.get("error") or "配音失败"))
+    except tts.TtsError as e:
         STATE.toolbox_tts["error"] = str(e)
         STATE.toolbox_tts["stage"] = "error"
     except Exception as e:  # noqa: BLE001
         STATE.toolbox_tts["error"] = str(e)
         STATE.toolbox_tts["stage"] = "error"
     finally:
+        if proc is not None:
+            try:
+                if proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=3)
+                    except Exception:
+                        proc.kill()
+            except Exception:
+                pass
         STATE.toolbox_tts["running"] = False
 
 
@@ -1019,6 +1053,8 @@ class Handler(BaseHTTPRequestHandler):
             st["models_cached"] = {m: models.whisper_cached(m) for m in ["tiny", "small", "large-v3"]}
             st["default_model"] = DEFAULT_MODEL
             st["download"] = models.download_state()
+            st["dl_dir_mb"] = models.whisper_dir_size_mb(st.get("model") or DEFAULT_MODEL)
+            st["dl_hint_mb"] = models.WHISPER_SIZE_HINT.get(st.get("model") or DEFAULT_MODEL, 0)
             self._send_json(st)
             return
         if route == "/api/toolbox/asr/stats":
@@ -2629,6 +2665,50 @@ def _open_browser_when_ready(url: str) -> None:
             time.sleep(0.5)
 
 
+def _tts_worker_main() -> None:
+    """AI 配音独立子进程：stdin/stdout JSON lines 协议。
+
+    原因：sherpa_onnx 自带 onnxruntime(1.28)，与主进程项目 onnxruntime(1.30)
+    存在同名 DLL 冲突风险（Windows 按名称去重），若在主进程加载会导致
+    进程崩溃（服务断开）。子进程隔离后，配音崩溃不影响主服务（模块化设计）。
+    """
+    import json as _json
+    import sys as _sys
+
+    sys_stdin = _sys.stdin
+    sys_stdout = _sys.stdout
+    # PyInstaller noconsole 下 stdin/stdout 可能为 None，用 os.fdopen 兜底
+    if sys_stdin is None:
+        sys_stdin = os.fdopen(0, "r", encoding="utf-8")
+    if sys_stdout is None:
+        sys_stdout = os.fdopen(1, "w", encoding="utf-8")
+    try:
+        sys_stdout.write(_json.dumps({"ready": True}) + "\n")
+        sys_stdout.flush()
+        line = sys_stdin.readline()
+        if not line:
+            return
+        task = _json.loads(line)
+        from toolbox import tts as tts_mod
+        out_dir = str(task.get("out_dir") or "")
+        os.makedirs(out_dir, exist_ok=True)
+        voice = str(task.get("voice") or "female")
+        out_path = str(Path(out_dir) / f"AI配音_{voice}_{time.strftime('%Y%m%d_%H%M%S')}.wav")
+        path, sr = tts_mod.synthesize(
+            str(task.get("text") or ""), voice=voice,
+            speed=float(task.get("speed") or 1.0), out_path=out_path,
+            service_url=str(task.get("service_url") or ""),
+        )
+        sys_stdout.write(_json.dumps({"ok": True, "path": path, "sr": sr}) + "\n")
+        sys_stdout.flush()
+    except Exception as e:  # noqa: BLE001
+        try:
+            sys_stdout.write(_json.dumps({"ok": False, "error": str(e)}) + "\n")
+            sys_stdout.flush()
+        except Exception:
+            pass
+
+
 def main() -> None:
     register_standard_dirs()
     global PORT
@@ -2654,4 +2734,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    if "--tts-worker" in sys.argv:
+        _tts_worker_main()
+    else:
+        main()
