@@ -240,6 +240,7 @@ body::before {
 }
 .input::placeholder { color: var(--text-3); }
 .input-path { font-family: var(--font-mono); font-size: 12.5px; }
+.input-error { border-color: var(--danger) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 20%, transparent) !important; }
 .input[type="number"] { font-family: var(--font-mono); }
 
 .row { display: grid; grid-template-columns: 150px 1fr; gap: var(--space-3); align-items: center; margin-bottom: var(--space-3); }

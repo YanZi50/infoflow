@@ -219,8 +219,7 @@ class AppState:
         self.update_info: dict | None = None  # 版本更新检查结果（失败保持 None，静默）
         self.update_download: dict | None = None  # 更新包下载状态 {"stage","done","total","error"}（None=未下载）
         # 工具箱任务状态（docs/工具箱设计方案.md）
-        self.toolbox: dict = {
-            "running": False,
+        self.toolbox: dict = {            "running": False,
             "stage": "idle",          # idle/running/done/cancelled/error
             "tool": "",
             "current": 0,
@@ -796,6 +795,17 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {{
 
 
 STATE = AppState()
+
+
+def _toolbox_any_busy(exclude: str = "") -> bool:
+    """工具箱并发互斥：任一工具运行中时，其他工具拒绝启动（避免多任务抢占 CPU/GPU）。"""
+    for name in ("toolbox", "toolbox_sub", "toolbox_asr", "toolbox_vad", "toolbox_tts", "toolbox_match"):
+        if name == exclude:
+            continue
+        st = getattr(STATE, name, None)
+        if st and st.get("running"):
+            return True
+    return False
 SELECT_LOCK = threading.Lock()
 
 
@@ -1084,6 +1094,11 @@ class Handler(BaseHTTPRequestHandler):
             tail = (query.get("tail") or [""])[0]
             middle = (query.get("middle") or [""])[0]
             bgm = (query.get("bgm") or [""])[0]
+            # 路径无效时明确报错（手输路径/路径被移动时前端标红提示，不再静默"未识别到素材"）
+            for key, val in (("head", head), ("tail", tail), ("middle", middle), ("bgm", bgm)):
+                if val and not os.path.isdir(val):
+                    self._send_json({"ok": False, "error": f"目录不存在：{val}"}, 400)
+                    return
             head_files = _scan_cached(head, "video")
             tail_files = _scan_cached(tail, "video")
             middle_files = _scan_cached(middle, "video")
@@ -1401,6 +1416,9 @@ class Handler(BaseHTTPRequestHandler):
         if STATE.toolbox.get("running"):
             self._send_json({"ok": False, "error": "已有工具箱任务正在运行"}, 409)
             return
+        if _toolbox_any_busy("toolbox"):
+            self._send_json({"ok": False, "error": "已有其他工具箱任务在运行，请等待完成后再开始"}, 409)
+            return
         payload = self._read_json()
         tool = str(payload.get("tool") or "").strip()
         folder = str(payload.get("folder") or "").strip()
@@ -1444,6 +1462,9 @@ class Handler(BaseHTTPRequestHandler):
         if STATE.toolbox_asr.get("running"):
             self._send_json({"ok": False, "error": "已有索引任务正在运行"}, 409)
             return
+        if _toolbox_any_busy("toolbox_asr"):
+            self._send_json({"ok": False, "error": "已有其他工具箱任务在运行，请等待完成后再开始"}, 409)
+            return
         payload = self._read_json()
         folder = str(payload.get("folder") or "").strip()
         model = str(payload.get("model") or "small").strip()
@@ -1468,6 +1489,9 @@ class Handler(BaseHTTPRequestHandler):
         """批量模式：文件夹内视频用①索引字幕烧录。"""
         if STATE.toolbox_sub.get("running"):
             self._send_json({"ok": False, "error": "已有字幕任务正在运行"}, 409)
+            return
+        if _toolbox_any_busy("toolbox_sub"):
+            self._send_json({"ok": False, "error": "已有其他工具箱任务在运行，请等待完成后再开始"}, 409)
             return
         payload = self._read_json()
         folder = str(payload.get("folder") or "").strip()
@@ -1494,6 +1518,9 @@ class Handler(BaseHTTPRequestHandler):
         """单文件模式：视频 + 外部 SRT/ASS（无字幕文件则用①索引）。"""
         if STATE.toolbox_sub.get("running"):
             self._send_json({"ok": False, "error": "已有字幕任务正在运行"}, 409)
+            return
+        if _toolbox_any_busy("toolbox_sub"):
+            self._send_json({"ok": False, "error": "已有其他工具箱任务在运行，请等待完成后再开始"}, 409)
             return
         payload = self._read_json()
         video = str(payload.get("video") or "").strip()
@@ -1526,6 +1553,9 @@ class Handler(BaseHTTPRequestHandler):
         if STATE.toolbox_match.get("running"):
             self._send_json({"ok": False, "error": "已有任务运行中"})
             return
+        if _toolbox_any_busy("toolbox_match"):
+            self._send_json({"ok": False, "error": "已有其他工具箱任务在运行，请等待完成后再开始"}, 409)
+            return
         payload = self._read_json()
         text = str(payload.get("text") or "").strip()
         if len(text) < 2:
@@ -1551,6 +1581,9 @@ class Handler(BaseHTTPRequestHandler):
         """AI 配音：文本 → wav（可选输出目录）。"""
         if STATE.toolbox_tts.get("running"):
             self._send_json({"ok": False, "error": "已有配音任务正在运行"}, 409)
+            return
+        if _toolbox_any_busy("toolbox_tts"):
+            self._send_json({"ok": False, "error": "已有其他工具箱任务在运行，请等待完成后再开始"}, 409)
             return
         payload = self._read_json()
         text = str(payload.get("text") or "").strip()
@@ -1580,6 +1613,9 @@ class Handler(BaseHTTPRequestHandler):
         if STATE.toolbox_vad.get("running"):
             self._send_json({"ok": False, "error": "已有剪气口任务正在运行"}, 409)
             return
+        if _toolbox_any_busy("toolbox_vad"):
+            self._send_json({"ok": False, "error": "已有其他工具箱任务在运行，请等待完成后再开始"}, 409)
+            return
         payload = self._read_json()
         folder = str(payload.get("folder") or "").strip()
         if not folder or not os.path.isdir(folder):
@@ -1606,6 +1642,9 @@ class Handler(BaseHTTPRequestHandler):
         """单文件模式：单个视频剪气口。"""
         if STATE.toolbox_vad.get("running"):
             self._send_json({"ok": False, "error": "已有剪气口任务正在运行"}, 409)
+            return
+        if _toolbox_any_busy("toolbox_vad"):
+            self._send_json({"ok": False, "error": "已有其他工具箱任务在运行，请等待完成后再开始"}, 409)
             return
         payload = self._read_json()
         video = str(payload.get("video") or "").strip()

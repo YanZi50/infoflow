@@ -8,6 +8,7 @@ const { createApp, reactive, ref, computed, onMounted, watch } = Vue;
 const state = reactive({
   step: 1,
   stepErrors: { 1: false, 2: false, 3: false },
+  pathErrors: {},   // 素材路径无效标红（head/tail/middle/bgm/pool_N），扫描成功清除
   theme: localStorage.getItem('sppj_theme') || 'dark',
   serverOk: null,   // null=连接中（启动首帧） / true=已连接 / false=连接失败
   selectBusy: false,
@@ -527,11 +528,18 @@ async function scan(kind) {
     return;
   }
   const folder = state.folders[kind].trim();
-  if (!folder) { state.materials[kind] = []; return; }
+  if (!folder) { state.materials[kind] = []; state.pathErrors[kind] = false; return; }
   if (kind === 'output') { state.stepErrors[1] = false; return; } // 必填项已填：素材库取消标红（输出目录无需扫描素材）
   try {
     const q = new URLSearchParams({ [kind]: folder });
     const data = await api('/api/scan?' + q.toString());
+    if (data.ok === false) {
+      state.pathErrors[kind] = true;
+      state.materials[kind] = [];
+      showMsg(data.error || '目录不存在，请检查路径', 'error');
+      return;
+    }
+    state.pathErrors[kind] = false;
     const files = data[kind] || [];
     // 只处理新增文件，避免重复请求详情
     const existing = new Map(state.materials[kind].map((m) => [m.path, m]));
@@ -543,16 +551,24 @@ async function scan(kind) {
     if (kind === 'head' || kind === 'tail') syncFixed(kind);
     scheduleFitGrids();
   } catch (e) {
+    state.pathErrors[kind] = true;
     showMsg('素材扫描失败：' + e.message, 'error');
   }
 }
 
 async function scanPool(pool) {
   const folder = (pool.folder || '').trim();
-  if (!folder) { pool.files = []; return; }
+  if (!folder) { pool.files = []; state.pathErrors['pool_' + pool.id] = false; return; }
   try {
     const q = new URLSearchParams({ middle: folder });
     const data = await api('/api/scan?' + q.toString());
+    if (data.ok === false) {
+      state.pathErrors['pool_' + pool.id] = true;
+      pool.files = [];
+      showMsg(data.error || '目录不存在，请检查路径', 'error');
+      return;
+    }
+    state.pathErrors['pool_' + pool.id] = false;
     const files = data.middle || [];
     const existing = new Map(pool.files.map((m) => [m.path, m]));
     const newFiles = files.filter((f) => !existing.has(f.path));
@@ -565,6 +581,7 @@ async function scanPool(pool) {
     pool.items = pool.items.filter((p) => valid.has(p));
     scheduleFitGrids();
   } catch (e) {
+    state.pathErrors['pool_' + pool.id] = true;
     showMsg('中间素材池扫描失败：' + e.message, 'error');
   }
 }

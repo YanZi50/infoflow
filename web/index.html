@@ -112,6 +112,7 @@
 
               <div class="folder-row">
                 <input class="input input-path" :id="'input_' + zone.kind" :placeholder="zone.placeholder"
+                       :class="{ 'input-error': pathErrors[zone.kind] }"
                        v-model="folders[zone.kind]" @change="scan(zone.kind)" @keydown.enter="scan(zone.kind)">
                 <span class="folder-count" v-if="materials[zone.kind].length">
                   {{ materials[zone.kind].length }} 个
@@ -186,6 +187,7 @@
                 </div>
                 <div class="folder-row">
                   <input class="input input-path" :id="'input_pool_' + pool.id" placeholder="中间素材池文件夹"
+                         :class="{ 'input-error': pathErrors['pool_' + pool.id] }"
                          v-model="pool.folder" @change="scanPool(pool)" @keydown.enter="scanPool(pool)">
                   <span class="folder-count" v-if="pool.files.length">{{ pool.files.length }} 个</span>
                   <button class="btn plain" @click="selectPoolFolder(pool)" :disabled="selectBusy">选择</button>
@@ -241,7 +243,8 @@
 
               <div class="folder-row">
                 <input class="input input-path" id="input_bgm" placeholder="可选：音乐文件夹"
-                       v-model="folders['bgm']" @change="scan('bgm')">
+                       :class="{ 'input-error': pathErrors.bgm }"
+                       v-model="folders['bgm']" @change="scan('bgm')" @keydown.enter="scan('bgm')">
                 <span class="folder-count" v-if="materials['bgm'].length">
                   {{ materials['bgm'].length }} 个
                 </span>
@@ -491,7 +494,8 @@
                 <div class="field">
                   <div class="field-label">音乐文件夹</div>
                   <div class="folder-row">
-                    <input class="input input-path" v-model="folders.bgm" @change="scan('bgm')" @keydown.enter="scan('bgm')">
+                    <input class="input input-path" :class="{ 'input-error': pathErrors.bgm }"
+                           v-model="folders.bgm" @change="scan('bgm')" @keydown.enter="scan('bgm')">
                     <button class="btn plain" @click="selectFolder('bgm')" :disabled="selectBusy">选择</button>
                   </div>
                 </div>
@@ -748,9 +752,9 @@
                     <span class="yield-label">实际生成</span>
                     <span class="yield-num total">{{ (health && health.actual_count) ? health.actual_count : yieldTotal }} 条</span>
                   </div>
-                  <div class="yield-cell" v-if="health.eta_seconds">
+                  <div class="yield-cell">
                     <span class="yield-label">预计生成时间</span>
-                    <span class="yield-num" style="color:var(--accent)">{{ fmtEta(health.eta_seconds) }}</span>
+                    <span class="yield-num" style="color:var(--accent)">{{ health.eta_seconds ? fmtEta(health.eta_seconds) : '—' }}</span>
                   </div>
                 </div>
                 <div class="health-items">
