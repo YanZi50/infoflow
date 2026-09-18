@@ -1633,7 +1633,7 @@ async function poll() {
     state.portable = !!s.portable;
     if (s.toolbox) state.toolbox = s.toolbox;
     if (s.toolbox_asr) {
-      const keep = { folder: state.toolboxAsr.folder };   // 输入字段不被后端空值覆盖
+      const keep = { folder: state.toolboxAsr.folder, model: state.toolboxAsr.model };   // 输入字段不被后端空值覆盖（model 由用户选择，轮询不重置）
       state.toolboxAsr = { ...state.toolboxAsr, ...s.toolbox_asr, ...keep };
       state.toolboxAsr.index_stats = s.toolbox_asr.index_stats || null;
       state.toolboxAsr.models_cached = s.toolbox_asr.models_cached || {};
