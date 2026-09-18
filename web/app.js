@@ -1644,6 +1644,7 @@ async function poll() {
     if (s.toolbox_sub) {
       const keep = {
         mode: state.toolboxSub.mode,
+        style: state.toolboxSub.style,
         folder: state.toolboxSub.folder,
         video: state.toolboxSub.video,
         sub_file: state.toolboxSub.sub_file,
@@ -1654,6 +1655,11 @@ async function poll() {
     if (s.toolbox_vad) {
       const keep = {
         mode: state.toolboxVad.mode,
+        sensitivity: state.toolboxVad.sensitivity,
+        min_silence: state.toolboxVad.min_silence,
+        pad_before: state.toolboxVad.pad_before,
+        pad_after: state.toolboxVad.pad_after,
+        max_silence: state.toolboxVad.max_silence,
         folder: state.toolboxVad.folder,
         video: state.toolboxVad.video,
         out_dir: state.toolboxVad.out_dir || (s.toolbox_vad.out_dir || ''),
@@ -1667,6 +1673,8 @@ async function poll() {
     if (s.toolbox_tts) {
       const keep = {
         text: state.toolboxTts.text,
+        voice: state.toolboxTts.voice,
+        speed: state.toolboxTts.speed,
         out_dir: state.toolboxTts.out_dir || (s.toolbox_tts.out_dir || ''),
         service_url: state.toolboxTts.service_url || (s.toolbox_tts.service_url || ''),
       };
