@@ -1874,6 +1874,19 @@ class Handler(BaseHTTPRequestHandler):
                     "failed": result.failed,
                     "cancelled": result.cancelled,
                     "elapsed_sec": round(max(0, time.time() - (STATE.started_at or time.time())), 1),
+                    # 失败明细入库（诊断盲区修复：之前只存摘要，出错无法定位是哪个素材/什么原因）
+                    "failed_items": [
+                        {
+                            "index": it.get("index", ""),
+                            "head": it.get("head", ""),
+                            "tail": it.get("tail", ""),
+                            "middle": it.get("middle", ""),
+                            "middle_files": it.get("middle_files") or [],
+                            "error": it.get("error", ""),
+                        }
+                        for it in result.failed_items
+                    ],
+                    "error": STATE.error,
                 }
                 save_history(record) if record_history else None
                 # 记录最近任务实测速度（条/秒，含并发），供下次预检估算生成时间
