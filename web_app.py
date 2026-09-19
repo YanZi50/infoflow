@@ -2553,7 +2553,8 @@ def _update_install_root() -> Path:
     """更新解压/脚本落点：便携版（frozen）解压到程序目录下 _update_new；开发版解压到系统临时目录。"""
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
-    return Path(tempfile.gettempdir())
+    # 开发版也落到项目根（web_app.py 所在目录），用户能看到《一键替换更新.bat》和更新包
+    return Path(__file__).resolve().parent
 
 
 def _download_update_async(download_url: str) -> None:
