@@ -1002,6 +1002,12 @@
                         <li v-for="(s, i) in currentGuide.steps" :key="i">{{ s }}</li>
                       </ol>
                     </div>
+                    <div v-if="currentGuide.tips && currentGuide.tips.length" class="tb-guide-row">
+                      <span class="tb-guide-k tb-guide-warn">注意事项</span>
+                      <div class="tb-guide-v">
+                        <div v-for="(t, i) in currentGuide.tips" :key="i" class="tb-tip">· {{ t }}</div>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -1177,7 +1183,7 @@
                   </div>
                 </div>
                 <div class="field">
-                  <div class="field-label">识别模型</div>
+                  <div class="field-label">识别模型<span class="field-q" title="small（约460MB）：速度快、中文口播识别够用，推荐日常使用；large-v3：精度更高，但模型约5.4GB需单独下载离线包，首次识别较慢">?</span></div>
                   <select class="input" v-model="toolboxAsr.model">
                     <option value="small">small · 快速（推荐，中文口播够用，约 460MB）</option>
                     <option value="large-v3">large-v3 · 精准（断句更好，约 1.5GB，首次索引约慢 3 倍）</option>
@@ -1373,7 +1379,7 @@
                   </select>
                 </div>
                 <div class="field">
-                  <div class="field-label">灵敏度 <span class="card-hint">低=更敏感</span></div>
+                  <div class="field-label">灵敏度 <span class="card-hint">低=更敏感</span><span class="field-q" title="值越低，越容易把静音段当气口剪掉（剪得更多）；值越高越保守（保留更多停顿）。双击滑杆恢复默认 0.5">?</span></div>
                   <input type="range" min="0.2" max="0.9" step="0.05" v-model.number="toolboxVad.sensitivity"
                          style="width:100%" @dblclick="toolboxVad.sensitivity=0.5">
                   <div class="card-hint">当前 {{ toolboxVad.sensitivity.toFixed(2) }}（双击滑杆恢复默认 0.50）</div>
@@ -1519,7 +1525,7 @@
                   <div class="card-hint" v-else-if="!toolboxTts.voices.length">未检测到可用音色模型</div>
                 </div>
                 <div class="field">
-                  <div class="field-label">语速（0.5~2.0）</div>
+                  <div class="field-label">语速（0.5~2.0）<span class="field-q" title="1.0 为正常语速；1.2~1.5 更紧凑适合短视频；0.8 更慢更稳重。双击滑杆恢复 1.0">?</span></div>
                   <input type="range" min="0.5" max="2" step="0.05" v-model.number="toolboxTts.speed"
                          style="width:100%" @dblclick="toolboxTts.speed=1.0">
                   <div class="card-hint">当前 {{ toolboxTts.speed.toFixed(2) }}x（双击滑杆恢复 1.0x）</div>

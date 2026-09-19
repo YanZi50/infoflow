@@ -1030,3 +1030,10 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 
 /* 工具箱: 配音/匹配文本框只能纵向拉伸 */
 textarea.input { resize: vertical; min-height: 100px; }
+
+
+/* 工具箱v2: 注意事项 */
+.tb-tip { color: var(--text-2); font-size: 12.5px; line-height: 1.7; }
+.tb-guide-warn { color: #d4943a !important; }
+.field-q { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; margin-left: 6px; border-radius: 50%; background: var(--bg-soft); color: var(--text-3); font-size: 11px; cursor: help; border: 1px solid var(--line); }
+.field-q:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
