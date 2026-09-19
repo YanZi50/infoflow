@@ -51,8 +51,34 @@
             <span class="health-dot" :class="serverOk === null ? 'connecting' : {off: !serverOk}"></span>
             {{ serverOk === null ? '正在连接服务…' : (serverOk ? '服务已连接' : '服务连接失败') }}
           </div>
-          <div v-if="updateInfo && updateInfo.has_update" class="update-hint" style="display:flex; flex-direction:column; gap:6px; align-items:flex-start; border:1px solid var(--accent-soft); border-radius:8px; padding:8px 10px; background:var(--bg-soft)">
-            <div style="font-weight:700; color:var(--accent)">发现新版本 {{ updateInfo.latest }}</div>
+          <!-- 版本号 + 更新入口（左下角常驻） -->
+          <div class="ver-row" style="display:flex; align-items:center; justify-content:space-between; gap:6px; margin-top:8px; padding:6px 10px; border:1px solid var(--border); border-radius:8px; background:var(--bg-soft); font-size:11px; color:var(--text-dim)">
+            <span>信息流素材一键拼接 <b style="color:var(--text)">{{ updateInfo ? updateInfo.current : '…' }}</b></span>
+            <template v-if="updateInfo && updateInfo.has_update">
+              <span style="color:var(--accent); font-weight:700; white-space:nowrap">发现新版本 {{ updateInfo.latest }}</span>
+            </template>
+            <span v-else-if="updateInfo && !updateInfo.has_update" style="color:var(--ok); white-space:nowrap">已是最新</span>
+          </div>
+          <div v-if="updateInfo && updateInfo.has_update" class="update-hint" style="display:flex; flex-direction:column; gap:6px; align-items:flex-start; margin-top:6px">
+            <template v-if="!updateDownload || updateDownload.stage === 'idle' || updateDownload.stage === 'failed'">
+              <div style="display:flex; gap:6px">
+                <button class="mini-btn primary" v-if="updateInfo.download_url" @click="downloadUpdate" :disabled="job.running"
+                        :title="job.running ? '任务运行中，结束后再更新' : '程序内下载新版 zip，就绪后一键替换'">⬇ 下载更新</button>
+                <a class="mini-btn" :href="updateInfo.release_url || updateInfo.url" target="_blank">GitHub 手动下载</a>
+              </div>
+              <div v-if="job.running && updateInfo.download_url" style="font-size:11px; color:var(--text-dim)">任务运行中，请结束后再更新</div>
+              <div v-if="!updateInfo.download_url" style="font-size:11px; color:var(--text-dim)">新版尚未附带安装包，请到 GitHub Releases 手动下载</div>
+            </template>
+            <template v-else-if="updateDownload.stage === 'downloading'">
+              <div style="font-size:11px; color:var(--text-dim)">正在下载更新包…
+                <span v-if="updateDownload.total > 0">{{ Math.min(100, Math.round(updateDownload.done / updateDownload.total * 100)) }}%</span>
+              </div>
+              <div class="dl-bar" style="width:100%; height:5px; background:var(--bg-soft); border-radius:3px; overflow:hidden">
+                <div :style="{height:'100%', width: updateDownload.total > 0 ? Math.min(100, updateDownload.done / updateDownload.total * 100) + '%' : '100%', background:'var(--accent)', borderRadius:'3px'}"></div>
+              </div>
+            </template>
+            <div v-else-if="updateDownload.stage === 'ready'" style="font-size:11px; color:var(--ok)">更新包已就绪，请关闭程序后运行《一键替换更新.bat》</div>
+          </div>
             <template v-if="!updateDownload || updateDownload.stage === 'idle' || updateDownload.stage === 'failed'">
               <div style="display:flex; gap:6px">
                 <button class="mini-btn primary" v-if="updateInfo.download_url" @click="downloadUpdate" :disabled="job.running"
