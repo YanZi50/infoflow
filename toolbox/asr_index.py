@@ -40,6 +40,7 @@ def transcribe_one(video_path: str, model_name: str = DEFAULT_MODEL,
     model = models.get_whisper(model_name)
     segments_iter, info = model.transcribe(
         video_path, vad_filter=True, beam_size=5, language=None,
+        initial_prompt="以下是普通话的句子，使用简体中文输出。",
     )
     segs: list[dict] = []
     for s in segments_iter:

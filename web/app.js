@@ -1289,8 +1289,14 @@ async function ttsImportAsr() {
 }
 
 async function asrSelectExportDir() {
-  const r = await pickFolder('选择字幕导出目录');
-  if (r) state.toolboxAsr.export_dir = r;
+  if (state.selectBusy) return;
+  state.selectBusy = true;
+  try {
+    const data = await api('/api/select_folder?name=toolbox_asr_export');
+    if (data.busy) { showMsg('文件夹选择窗口已打开', 'info'); return; }
+    if (data.path) state.toolboxAsr.export_dir = data.path;
+  } catch (e) { showMsg('选择失败：' + e.message, 'error'); }
+  finally { state.selectBusy = false; }
 }
 async function asrExportSrt() {
   if (!state.toolboxAsr.export_dir) { showMsg('请先选择导出目录', 'error'); return; }
