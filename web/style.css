@@ -1027,3 +1027,6 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
   .toolbox-nav { position: static; flex-direction: row; flex-wrap: wrap; }
   .tb-group { flex: 1 1 200px; }
 }
+
+/* 工具箱: 配音/匹配文本框只能纵向拉伸 */
+textarea.input { resize: vertical; min-height: 100px; }

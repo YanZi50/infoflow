@@ -620,6 +620,15 @@ def _segments_to_text(segments) -> str:
     return "。".join(parts)
 
 
+def _srt_ts(sec) -> str:
+    """秒 → SRT 时间戳 HH:MM:SS,mmm"""
+    ms = int(round(float(sec) * 1000))
+    h, ms = divmod(ms, 3600000)
+    m, ms = divmod(ms, 60000)
+    s, ms = divmod(ms, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
 def _toolbox_vad_worker(target: str, out_dir: str, sensitivity: float,
                         min_silence: float, pad_before: float, pad_after: float,
                         max_silence: float, single_file: bool) -> None:
@@ -1050,6 +1059,7 @@ class Handler(BaseHTTPRequestHandler):
             st = dict(STATE.toolbox_asr)
             st["errors"] = list(st.get("errors") or [])
             st["index_stats"] = store.stats()
+            st["index_dir"] = str(store.index_root())
             st["models_cached"] = {m: models.whisper_cached(m) for m in ["tiny", "small", "large-v3"]}
             st["default_model"] = DEFAULT_MODEL
             st["download"] = models.download_state()
@@ -1102,6 +1112,39 @@ class Handler(BaseHTTPRequestHandler):
             texts = [{"path": p, "text": _segments_to_text(it.get("segments"))}
                      for p, it in items.items() if it.get("segments")]
             self._send_json({"ok": True, "items": texts})
+            return
+        if route == "/api/toolbox/asr/export_srt":
+            from toolbox import store as _store
+            payload = self._read_json()
+            out_dir = (payload or {}).get("dir") or ""
+            if not out_dir:
+                self._send_json({"ok": False, "error": "未指定导出目录"})
+                return
+            from pathlib import Path as _P
+            out_p = _P(out_dir)
+            out_p.mkdir(parents=True, exist_ok=True)
+            items = _store.load_all()
+            n = 0
+            for vpath, it in items.items():
+                segs = it.get("segments") or []
+                if not segs:
+                    continue
+                base = _P(vpath).stem
+                lines = []
+                idx = 0
+                for seg in segs:
+                    t = str(seg.get("text") or "").strip()
+                    if not t:
+                        continue
+                    idx += 1
+                    lines.append(str(idx))
+                    lines.append(f"{_srt_ts(seg.get('start') or 0)} --> {_srt_ts(seg.get('end') or 0)}")
+                    lines.append(t)
+                    lines.append("")
+                if lines:
+                    (out_p / f"{base}.srt").write_text("\n".join(lines), encoding="utf-8")
+                    n += 1
+            self._send_json({"ok": True, "count": n, "dir": str(out_p)})
             return
         if route == "/api/ping":
             self._send_json({"ok": True})

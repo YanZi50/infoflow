@@ -1206,10 +1206,20 @@
                 </div>
               </div>
 
+              <div class="field" style="margin-top:14px">
+                <div class="field-label">字幕导出目录<span class="card-hint" style="margin-left:6px">可选：把识别字幕导出为 SRT 文件</span></div>
+                <div class="folder-row">
+                  <input class="input input-path" placeholder="选择导出 SRT 的目录" v-model="toolboxAsr.export_dir">
+                  <button class="btn plain" @click="asrSelectExportDir">选择</button>
+                </div>
+                <div class="card-hint" style="margin-top:4px">索引内部存放：{{ toolboxAsr.index_dir || '程序内部 index 目录（自动管理）' }}</div>
+              </div>
+
               <div class="btn-row" style="margin-top:14px">
                 <button class="btn" @click="asrRun" :disabled="toolboxAsr.running">开始索引</button>
                 <button v-if="toolboxAsr.running" class="btn plain" @click="asrCancel">取消</button>
                 <button class="btn plain" @click="asrClear" :disabled="toolboxAsr.running || !asrStats.count">清空索引</button>
+                <button class="btn plain" @click="asrExportSrt" :disabled="toolboxAsr.running || !asrStats.count">导出 SRT</button>
               </div>
 
               <!-- 进度 -->
@@ -1493,7 +1503,7 @@
                   <div class="field-label">旁白文本
                     <button class="btn plain" style="margin-left:8px;padding:2px 8px;font-size:12px"
                             @click="ttsImportAsr" :disabled="toolboxTts.running">从识别索引导入</button>
-                    <span class="card-hint" v-if="toolboxTts.text_len">（当前 {{ toolboxTts.text_len }} 字）</span>
+                    <span class="card-hint">（当前 {{ (toolboxTts.text || '').length }} 字）</span>
                   </div>
                   <textarea class="input" rows="6" v-model="toolboxTts.text"
                             placeholder="输入要合成的旁白文本，支持长文本（自动分段合成拼接）。也可从「语音识别与索引」导入已识别视频的字幕文本。"></textarea>

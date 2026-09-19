@@ -35,10 +35,10 @@ const state = reactive({
   materials: { head: [], tail: [], middle: [], bgm: [] },
   fixed: { head: '', tail: '', middle: '', bgm: '' },
   toolbox: { running: false, stage: 'idle', tool: '', current: 0, total: 0, current_file: '', results: [], cancel: false, out_dir: '', error: null },
-  toolboxAsr: { running: false, stage: 'idle', folder: '', model: 'small', current: 0, total: 0, current_file: '', done: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, index_stats: null, models_cached: {}, download: null, dl_dir_mb: 0, dl_hint_mb: 0, last_status: '' },
+  toolboxAsr: { running: false, stage: 'idle', folder: '', model: 'small', current: 0, total: 0, current_file: '', done: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, index_stats: null, models_cached: {}, export_dir: '', index_dir: '', download: null, dl_dir_mb: 0, dl_hint_mb: 0, last_status: '' },
   toolboxSub: { running: false, stage: 'idle', mode: 'folder', style: 'minimal', folder: '', video: '', sub_file: '', out_dir: '', current: 0, total: 0, current_file: '', ok: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, last_status: '' },
   toolboxVad: { running: false, stage: 'idle', mode: 'folder', sensitivity: 0.5, min_silence: 0.6, pad_before: 0.3, pad_after: 0.3, max_silence: 5.0, folder: '', video: '', out_dir: '', current: 0, total: 0, current_file: '', ok: 0, skipped: 0, failed: 0, errors: [], cancel: false, error: null, last_status: '', previewShow: false, previewLoading: false, previewFile: '', previewDur: 0, previewProbs: [], previewWave: [], previewWin: 0.032, previewSegs: [], previewCuts: [], previewCutDur: 0, previewCutCount: 0, previewCutTotal: 0, previewKeepPct: 0 },
-  toolboxTts: { running: false, stage: 'idle', voice: 'female', speed: 1.0, text: '', text_len: 0, current: 0, total: 0, out_path: '', out_dir: '', error: null, cancel: false, voices: [], voice_names: {}, deps_ok: true, service_url: '' },
+  toolboxTts: { running: false, stage: 'idle', voice: 'female', speed: 1.0, text: '', text_len: 0, imported: false, current: 0, total: 0, out_path: '', out_dir: '', error: null, cancel: false, voices: [], voice_names: {}, deps_ok: true, service_url: '' },
   toolboxMatch: { running: false, stage: 'idle', text: '', text_len: 0, current: 0, total: 0, out_path: '', out_burned: '', report: [], videos_used: 0, matched: 0, out_dir: '', burn_style: 'minimal', error: null, cancel: false, deps_ok: true, index_count: 0, last_log: '' },
   toolboxUI: {
     tab: 'media',           // media/asr/subtitle/cut/match
@@ -1269,16 +1269,30 @@ async function ttsSelectOut() {
 
 async function ttsImportAsr() {
   try {
+    if (state.toolboxTts.imported && (state.toolboxTts.text || '').trim()) {
+      showMsg('已从识别索引导入过；如需重新导入请先清空文本框', 'warn'); return;
+    }
     const r = await api('/api/toolbox/asr/texts');
     if (!r || !r.ok) { showMsg((r && r.error) || '拉取识别文本失败', 'error'); return; }
     const items = (r.items || []).filter((it) => it.text);
     if (!items.length) { showMsg('识别索引为空：请先在「语音识别与索引」页建立索引', 'warn'); return; }
-    let merged = items.map((it) => it.text).join('。');
-    if (state.toolboxTts.text && !/。$/.test(state.toolboxTts.text.trim())) merged = state.toolboxTts.text + '。' + merged;
-    else if (state.toolboxTts.text) merged = state.toolboxTts.text + merged;
-    state.toolboxTts.text = merged;
+    state.toolboxTts.text = items.map((it) => it.text).join('。');
+    state.toolboxTts.imported = true;
     showMsg(`已从识别索引导入 ${items.length} 条文本（${state.toolboxTts.text.length} 字）`, 'success');
   } catch (e) { showMsg('导入失败：' + e.message, 'error'); }
+}
+
+async function asrSelectExportDir() {
+  const r = await pickFolder('选择字幕导出目录');
+  if (r) state.toolboxAsr.export_dir = r;
+}
+async function asrExportSrt() {
+  if (!state.toolboxAsr.export_dir) { showMsg('请先选择导出目录', 'error'); return; }
+  try {
+    const r = await apiFetch('/api/toolbox/asr/export_srt', { method: 'POST', body: JSON.stringify({ dir: state.toolboxAsr.export_dir }) });
+    if (!r.ok) { showMsg(r.error || '导出失败', 'error'); return; }
+    showMsg(`已导出 ${r.count} 个 SRT 字幕文件`, 'success');
+  } catch (e) { showMsg('导出失败：' + e.message, 'error'); }
 }
 
 async function matchRun() {
@@ -1704,7 +1718,7 @@ async function poll() {
     state.portable = !!s.portable;
     if (s.toolbox) state.toolbox = s.toolbox;
     if (s.toolbox_asr) {
-      const keep = { folder: state.toolboxAsr.folder, model: state.toolboxAsr.model };   // 输入字段不被后端空值覆盖（model 由用户选择，轮询不重置）
+      const keep = { folder: state.toolboxAsr.folder, model: state.toolboxAsr.model, export_dir: state.toolboxAsr.export_dir };   // 输入字段不被后端空值覆盖（model 由用户选择，轮询不重置）
       state.toolboxAsr = { ...state.toolboxAsr, ...s.toolbox_asr, ...keep };
       state.toolboxAsr.index_stats = s.toolbox_asr.index_stats || null;
       state.toolboxAsr.models_cached = s.toolbox_asr.models_cached || {};
@@ -1986,7 +2000,7 @@ createApp({
       selectFolder, pickWatermark, pickVoiceover,
       scan, toggleFixed, fileName, shortError, fmtEta, makeDownloadUrl,
       toolboxSelect, toolboxRun, toolboxCancel, toolboxClear, toolboxOpenOut,
-      asrRun, asrCancel, asrClear, asrSelectFolder, asrProgress, asrStats, asrDurationText, asrModelText, asrDlPercent, asrDlText,
+      asrRun, asrCancel, asrClear, asrSelectFolder, asrProgress, asrStats, asrDurationText, asrModelText, asrDlPercent, asrDlText, asrSelectExportDir, asrExportSrt,
       subSelectMain, subSelectFile, subSelectOut, subRun, subCancel, subOpenOut, subProgress,
       vadSelectMain, vadSelectOut, vadRun, vadCancel, vadOpenOut, vadProgress,
       vadPreview, vadPreviewClose, vadPreviewPlay, vadFmtTime, vadPreviewRecompute,
