@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>信息流素材一键拼接</title>
   <link rel="icon" href="/app.ico" type="image/x-icon">
-  <link rel="stylesheet" href="/style.css?v=20260912">
+  <link rel="stylesheet" href="/style.css?v=tbv2">
 </head>
 <body>
   <div id="app" v-cloak>
@@ -956,12 +956,54 @@
               <div class="tb-orb tb-orb-2"></div>
               <div class="tb-orb tb-orb-3"></div>
             </div>
-            <div class="toolbox-tabs">
-              <button v-for="t in toolboxTabs" :key="t.id" class="toolbox-tab"
-                      :class="{active: toolboxUI.tab===t.id}" @click="toolboxUI.tab=t.id">
-                {{ t.name }}
-              </button>
-            </div>
+            <div class="toolbox-layout">
+              <!-- 左侧：父级导航 -->
+              <aside class="toolbox-nav">
+                <div v-for="g in toolboxGroups" :key="g.id" class="tb-group">
+                  <div class="tb-group-head" :class="{active: toolboxUI.group === g.id}" @click="tbGroupClick(g.id)">
+                    <span class="tb-group-icon">{{ g.icon }}</span>
+                    <div class="tb-group-meta">
+                      <div class="tb-group-name">{{ g.name }}</div>
+                      <div class="tb-group-desc">{{ g.desc }}</div>
+                    </div>
+                  </div>
+                  <div class="tb-group-tabs" v-if="toolboxUI.group === g.id">
+                    <button v-for="t in g.tabs" :key="t.id" class="tb-subtab"
+                            :class="{active: toolboxUI.tab === t.id}" @click="toolboxUI.tab = t.id">
+                      <span class="tb-subdot"></span>{{ t.name }}
+                    </button>
+                  </div>
+                </div>
+              </aside>
+
+              <!-- 右侧：子功能内容 -->
+              <div class="toolbox-main">
+                <!-- 新手引导说明区 -->
+                <div class="tb-guide card glass" v-if="currentGuide">
+                  <div class="tb-guide-head">
+                    <span class="tb-guide-icon">{{ currentGuide.icon }}</span>
+                    <div class="tb-guide-name">{{ currentGuide.name }}</div>
+                    <button class="tb-guide-toggle" @click="toggleGuideCollapsed">
+                      {{ guideCollapsed ? '展开说明 ▾' : '收起说明 ▴' }}
+                    </button>
+                  </div>
+                  <div v-show="!guideCollapsed" class="tb-guide-body">
+                    <div class="tb-guide-row">
+                      <span class="tb-guide-k">这是什么</span>
+                      <span class="tb-guide-v">{{ currentGuide.what }}</span>
+                    </div>
+                    <div class="tb-guide-row">
+                      <span class="tb-guide-k">什么时候用</span>
+                      <span class="tb-guide-v">{{ currentGuide.when }}</span>
+                    </div>
+                    <div class="tb-guide-row">
+                      <span class="tb-guide-k">三步上手</span>
+                      <ol class="tb-guide-steps">
+                        <li v-for="(s, i) in currentGuide.steps" :key="i">{{ s }}</li>
+                      </ol>
+                    </div>
+                  </div>
+                </div>
 
             <!-- 媒体工具 -->
             <div v-show="toolboxUI.tab==='media'">
@@ -1588,6 +1630,9 @@
                 </div>
               </template>
             </div>
+
+                </div><!-- /toolbox-main -->
+              </div><!-- /toolbox-layout -->
           </section>
 
         </div>
@@ -1599,9 +1644,9 @@
   </div>
 
   <script src="/vendor/vue.global.prod.js?v=20260914"></script>
-  <script src="/options.js?v=r59"></script>
-  <script src="/util.js?v=r59"></script>
-  <script src="/api.js?v=r59"></script>
-  <script src="/app.js?v=r59"></script>
+  <script src="/options.js?v=tbv2"></script>
+  <script src="/util.js?v=tbv2"></script>
+  <script src="/api.js?v=tbv2"></script>
+  <script src="/app.js?v=tbv2"></script>
 </body>
 </html>

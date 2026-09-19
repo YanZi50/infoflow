@@ -953,3 +953,77 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .paxis-tick { position: absolute; transform: translateX(-50%); font-size: 10px; font-family: var(--font-mono); color: var(--text-3); }
 .preview-audio-row { }
 .preview-audio-btns { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* ============ 工具箱 v2：左父右子布局 ============ */
+.toolbox-layout { display: grid; grid-template-columns: 218px 1fr; gap: 16px; align-items: start; position: relative; z-index: 1; }
+.toolbox-nav { display: flex; flex-direction: column; gap: 10px; position: sticky; top: 0; }
+.tb-group { border-radius: 14px; overflow: hidden; }
+.tb-group-head {
+  display: flex; gap: 10px; align-items: center; padding: 12px 14px; cursor: pointer;
+  border-radius: 14px; border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  background: color-mix(in srgb, var(--bg-soft) 72%, transparent);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  transition: all .2s;
+}
+.tb-group-head:hover { border-color: var(--accent); transform: translateX(2px); }
+.tb-group-head.active {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 24%, transparent), color-mix(in srgb, #7c5cff 16%, transparent));
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: 0 4px 18px color-mix(in srgb, var(--accent) 18%, transparent), inset 0 1px 0 rgba(255,255,255,.06);
+}
+.tb-group-icon { font-size: 20px; line-height: 1; flex-shrink: 0; }
+.tb-group-meta { min-width: 0; }
+.tb-group-name { font-size: 13.5px; font-weight: 700; color: var(--text-1); }
+.tb-group-desc { font-size: 11px; color: var(--text-2); margin-top: 2px; line-height: 1.4; }
+.tb-group-tabs { display: flex; flex-direction: column; gap: 6px; padding: 10px 0 2px 14px; animation: tbFadeIn .22s ease; }
+.tb-subtab {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px;
+  border: 1px solid transparent; background: transparent; color: var(--text-2);
+  cursor: pointer; font-size: 12.5px; font-weight: 500; text-align: left; transition: all .16s;
+}
+.tb-subtab:hover { background: color-mix(in srgb, var(--bg-soft) 80%, transparent); color: var(--text-1); }
+.tb-subtab.active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  color: var(--text-1); font-weight: 700;
+}
+.tb-subdot { width: 5px; height: 5px; border-radius: 50%; background: var(--line-strong); flex-shrink: 0; transition: all .16s; }
+.tb-subtab.active .tb-subdot { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+.toolbox-main { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+@keyframes tbFadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+/* 新手引导说明区 */
+.tb-guide { margin-bottom: 2px; position: relative; overflow: hidden; }
+.tb-guide::before {
+  content: ''; position: absolute; inset: 0 0 auto; height: 2px;
+  background: linear-gradient(90deg, var(--accent), #7c5cff, transparent);
+  opacity: .8;
+}
+.tb-guide-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; }
+.tb-guide-icon { font-size: 18px; }
+.tb-guide-name { font-size: 13px; font-weight: 700; color: var(--text-1); flex: 1; }
+.tb-guide-toggle {
+  padding: 4px 12px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+  background: color-mix(in srgb, var(--bg-soft) 80%, transparent); color: var(--text-2);
+  cursor: pointer; font-size: 11.5px; transition: all .16s;
+}
+.tb-guide-toggle:hover { border-color: var(--accent); color: var(--text-1); }
+.tb-guide-body {
+  display: flex; flex-direction: column; gap: 8px; padding: 4px 16px 14px;
+  border-top: 1px dashed color-mix(in srgb, var(--line) 60%, transparent);
+}
+.tb-guide-row { display: flex; gap: 10px; align-items: flex-start; font-size: 12.5px; line-height: 1.6; }
+.tb-guide-k {
+  flex-shrink: 0; min-width: 64px; text-align: center; padding: 2px 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent);
+  font-size: 11px; font-weight: 700; margin-top: 2px;
+}
+.tb-guide-v { color: var(--text-2); }
+.tb-guide-steps { margin: 0; padding-left: 18px; color: var(--text-2); }
+.tb-guide-steps li { margin: 2px 0; }
+.tb-guide-steps li::marker { color: var(--accent); font-weight: 700; }
+@media (max-width: 1100px) {
+  .toolbox-layout { grid-template-columns: 1fr; }
+  .toolbox-nav { position: static; flex-direction: row; flex-wrap: wrap; }
+  .tb-group { flex: 1 1 200px; }
+}

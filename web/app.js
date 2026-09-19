@@ -42,6 +42,7 @@ const state = reactive({
   toolboxMatch: { running: false, stage: 'idle', text: '', text_len: 0, current: 0, total: 0, out_path: '', out_burned: '', report: [], videos_used: 0, matched: 0, out_dir: '', burn_style: 'minimal', error: null, cancel: false, deps_ok: true, index_count: 0, last_log: '' },
   toolboxUI: {
     tab: 'media',           // media/asr/subtitle/cut/match
+    group: 'media',         // 工具箱v2 父级分组 media/asr/create
     folder: '',             // 输入文件夹
     out_dir: '',            // 输出目录
     kind: 'video',          // video/audio/all
@@ -55,6 +56,7 @@ const state = reactive({
   },
   materialSearch: { head: '', tail: '', bgm: '' },   // 素材库关键字搜索
   soundOn: localStorage.getItem('sppj_sound') !== 'off',  // 任务完成提示音
+  guideCollapsed: localStorage.getItem('sppj_guide') === '1',  // 工具箱说明区默认展开
   middlePools: [{ id: 1, folder: '', items: [], count: 1, files: [], expanded: false, search: '' }],
   zoneExpanded: { head: false, tail: false, middle: false, bgm: false },
   params: {
@@ -149,19 +151,74 @@ function updateFailedTip(err) {
   showMsg('更新下载失败：' + (err || '网络异常，可到 GitHub Releases 手动下载'), 'error');
 }
 
-/* ---------- 页面标题 ---------- */
-const toolboxTabs = [
-  { id: 'media', name: '媒体工具' },
-  { id: 'asr', name: '语音识别与索引' },
-  { id: 'subtitle', name: '字幕包装' },
-  { id: 'cut', name: '剪气口' },
-  { id: 'tts', name: 'AI 配音' },
-  { id: 'match', name: '文本匹配拼接' },
+/* ---------- 工具箱 v2：父级分组 + 说明 ---------- */
+const toolboxGroups = [
+  {
+    id: 'media', name: '素材处理', icon: '\u{1F3AC}',
+    desc: '对素材做基础加工：改格式、压缩、截取等',
+    tabs: [{ id: 'media', name: '媒体工具' }],
+  },
+  {
+    id: 'asr', name: '语音识别', icon: '\u{1F399}',
+    desc: '把素材语音转成文字索引（智能创作的地基）',
+    tabs: [{ id: 'asr', name: '语音识别与索引' }],
+  },
+  {
+    id: 'create', name: '智能创作', icon: '\u{2728}',
+    desc: '基于识别索引的自动化加工与合成',
+    tabs: [
+      { id: 'subtitle', name: '字幕包装' },
+      { id: 'cut', name: '剪气口' },
+      { id: 'tts', name: 'AI 配音' },
+      { id: 'match', name: '文本匹配拼接' },
+    ],
+  },
 ];
+/* 每个子功能的新手说明（这是什么 / 什么时候用 / 三步上手） */
+const toolboxGuides = {
+  media: {
+    icon: '\u{1F3AC}', name: '媒体工具',
+    what: '批量处理素材文件的工具集：转码（改格式/分辨率/码率）、压缩（控体积）、抽帧（截画面）、提取音频、裁剪（按时段截取）、合并（多段拼一条）。',
+    when: '素材格式不被平台接受、文件体积太大、需要截取某段画面/声音、或要把多条素材合并成一条时使用。',
+    steps: ['选择输入文件夹（要处理的素材）和输出目录（结果存放位置）', '选择工具并设置参数（如转码选目标格式、压缩选质量）', '点「开始处理」，完成后在输出目录查看结果'],
+  },
+  asr: {
+    icon: '\u{1F399}', name: '语音识别与索引',
+    what: '用语音识别模型把素材视频里说的话转成文字，并为每个视频建立"说了什么 + 在哪段时间说的"字幕索引。',
+    when: '使用「文本匹配拼接」或批量烧录字幕之前，必须先建索引。素材库新增了视频后，也建议再次运行做增量更新。',
+    steps: ['选择素材文件夹', '选择识别模型（推荐 small：快、中文口播够用；要求更高精度可选 large-v3）', '点「开始索引」；之后素材库加了新视频，再点一次只处理新增的'],
+  },
+  subtitle: {
+    icon: '\u{1F4AC}', name: '字幕包装',
+    what: '给视频烧录（嵌入）字幕。支持两种方式：批量模式用「语音识别索引」自动生成的字幕；单文件模式用外部 SRT/ASS 字幕文件。',
+    when: '给成片加上字幕让观众更容易看懂口播内容时使用。',
+    steps: ['选择处理方式（批量 / 单文件）', '选字幕样式（极简 / 描边黄 / 气泡条 / 弹幕）', '选择素材和输出目录，点「开始烧录」'],
+  },
+  cut: {
+    icon: '\u{2702}', name: '剪气口',
+    what: '自动识别口播视频里的长停顿（静音段），一键剪掉，让视频节奏更紧凑。',
+    when: '口播素材有大量"嗯、啊、停顿"，想让节奏更利落时使用。',
+    steps: ['选择素材文件夹（或单个视频）和输出目录', '可先点「预览检测」看会剪掉哪些停顿', '调灵敏度等参数（双击滑杆恢复默认），点「开始剪气口」'],
+  },
+  tts: {
+    icon: '\u{1F50A}', name: 'AI 配音',
+    what: '离线中文语音合成：输入一段文字，生成口播旁白音频（WAV），无需联网。也可以从「语音识别与索引」导入素材字幕作为旁白文本。',
+    when: '需要给成片配旁白、或把文案变成口播音频时使用。生成的口播 WAV 可用于生成页的「口播配音」联动。',
+    steps: ['输入旁白文本（或从识别索引导入）', '选择音色、调节语速（双击滑杆恢复 1.0x）', '选择输出目录，点「开始合成」，完成后可试听'],
+  },
+  match: {
+    icon: '\u{1F9E9}', name: '文本匹配拼接',
+    what: '输入一段文案，程序按句拆分，从「语音识别与索引」的素材库里自动找语义最接近的口播片段，拼接成一段对口视频。',
+    when: '有现成文案（脚本），想从自己的口播素材库里自动凑出一段对口的视频时使用。',
+    steps: ['先到「语音识别与索引」为素材库建立索引', '粘贴文案（每行一句，逐句匹配）', '选择输出目录和字幕样式，点「开始匹配拼接」，完成后可查看匹配报告'],
+  },
+};
+const toolboxTabs = toolboxGroups.flatMap((g) => g.tabs);  // 由分组派生（兼容旧引用）
 const toolboxTabName = computed(() => {
   const t = toolboxTabs.find((x) => x.id === state.toolboxUI.tab);
   return t ? t.name : '工具箱';
 });
+const currentGuide = computed(() => toolboxGuides[state.toolboxUI.tab] || null);
 const toolboxProgress = computed(() => {
   const total = state.toolbox.total || 0;
   if (!total) return 0;
@@ -1477,6 +1534,20 @@ function goStep(n) {
   if (n === 4 && !state.job.running) precheck(true);
 }
 
+/* 工具箱 v2：点击父级分组 → 切组并跳转到该组第一个子功能 */
+function tbGroupClick(gid) {
+  const g = toolboxGroups.find((x) => x.id === gid);
+  if (!g) return;
+  state.toolboxUI.group = gid;
+  const inGroup = g.tabs.some((t) => t.id === state.toolboxUI.tab);
+  if (!inGroup) state.toolboxUI.tab = g.tabs[0].id;
+}
+/* 说明区折叠状态持久化 */
+function toggleGuideCollapsed() {
+  state.guideCollapsed = !state.guideCollapsed;
+  localStorage.setItem('sppj_guide', state.guideCollapsed ? '1' : '0');
+}
+
 async function startJob() {
   const payload = collectConfig();
   if (!payload.head_folder || !payload.tail_folder) { showMsg('请先填写开头和结尾文件夹', 'error'); return; }
@@ -1897,6 +1968,7 @@ createApp({
       ...Vue.toRefs(state),
       state, pageTitle, pageDesc,
       toolboxTabs, toolboxTabName, toolboxProgress,
+      toolboxGroups, toolboxGuides, currentGuide, tbGroupClick, toggleGuideCollapsed,
       // 选项表：动态（后端 /api/options 拉取后原地更新 + optionsRev 驱动重渲染）
       transitionOptions: computed(() => { optionsRev.value; return transitionOptions; }),
       dedupeLevels: computed(() => { optionsRev.value; return dedupeLevels; }),
