@@ -64,6 +64,26 @@ def models_dir() -> Path:
     return d
 
 
+def user_models_dir() -> Path | None:
+    """用户模型目录：便携版 exe 同级的 models/（用户可放离线包，可见可写）。不存在返回 None。"""
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        d = Path(sys.executable).parent / "models"
+        if d.is_dir():
+            return d
+    return None
+
+
+def _whisper_search_dirs() -> list:
+    """whisper 模型查找顺序：用户目录(优先) → 内置目录。"""
+    out = []
+    um = user_models_dir()
+    if um is not None:
+        out.append(um)
+    out.append(models_dir())
+    return out
+
+
 def set_hf_mirror() -> None:
     """HuggingFace 走国内镜像（可被用户环境变量覆盖）。"""
     os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
@@ -72,17 +92,18 @@ def set_hf_mirror() -> None:
 
 
 def whisper_cached(name: str) -> bool:
-    """该 whisper 模型是否已就绪：优先本地预置目录（models/faster-whisper-<name>/），
-    其次 huggingface 缓存（models/models--Systran--faster-whisper-<name>/）。"""
+    """该 whisper 模型是否已就绪：用户目录(离线包) → 内置预置 → HF缓存。"""
     name = (name or "small").strip()
     try:
-        local = models_dir() / f"faster-whisper-{name}"
-        if (local / "model.bin").is_file() and (local / "config.json").is_file():
-            return True
-        base = models_dir() / f"models--Systran--faster-whisper-{name}"
-        if base.is_dir():
-            for snap in base.rglob("config.json"):
+        for base_dir in _whisper_search_dirs():
+            local = base_dir / f"faster-whisper-{name}"
+            if (local / "model.bin").is_file() and (local / "config.json").is_file():
                 return True
+            hf = base_dir / f"models--Systran--faster-whisper-{name}"
+            if hf.is_dir():
+                for snap in hf.glob("snapshots/*"):
+                    if (snap / "model.bin").is_file():
+                        return True
     except Exception:
         pass
     return False
@@ -101,11 +122,23 @@ def get_whisper(name: str):
         if name in _MODELS:
             return _MODELS[name]
         from faster_whisper import WhisperModel
-        local = models_dir() / f"faster-whisper-{name}"
-        if (local / "model.bin").is_file() and (local / "config.json").is_file():
-            model = WhisperModel(str(local), device="cpu", compute_type="int8")
-            _MODELS[name] = model
-            return model
+        # 1) 预置目录 faster-whisper-<name>/（用户目录优先）
+        for base_dir in _whisper_search_dirs():
+            local = base_dir / f"faster-whisper-{name}"
+            if (local / "model.bin").is_file() and (local / "config.json").is_file():
+                model = WhisperModel(str(local), device="cpu", compute_type="int8")
+                _MODELS[name] = model
+                return model
+        # 2) HF 缓存格式 models--Systran--.../snapshots/<hash>/（离线包）
+        for base_dir in _whisper_search_dirs():
+            hf = base_dir / f"models--Systran--faster-whisper-{name}"
+            if hf.is_dir():
+                for snap in hf.glob("snapshots/*"):
+                    if (snap / "model.bin").is_file():
+                        model = WhisperModel(str(snap), device="cpu", compute_type="int8")
+                        _MODELS[name] = model
+                        return model
+        # 3) 都没有 → 联网下载（到内置目录）
         set_hf_mirror()
         _DL.update({"active": True, "model": name, "file": "", "n": 0, "total": 0, "done": False, "error": None})
         restore = _patch_tqdm()
