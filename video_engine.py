@@ -183,6 +183,7 @@ def run_ffmpeg(
     cancel_event,
     pause_event,
     log: Optional[Callable[[str], None]] = None,
+    cwd=None,
 ) -> None:
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     if log:
@@ -192,6 +193,7 @@ def run_ffmpeg(
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         creationflags=creationflags,
+        cwd=cwd,
     )
     try:
         while proc.poll() is None:
@@ -860,6 +862,147 @@ def apply_watermark(
     run_ffmpeg(args, cancel_event, pause_event, log)
 
 
+def _gen_noise_png(seed: int) -> str:
+    """生成一张 120x120 浅灰噪点 PNG（隐式水印-跳动模式用）。
+    灰度范围 235-255（接近白），叠在画面上只是轻微提亮，肉眼几乎不可见。"""
+    import random as _r
+    import tempfile as _tf
+    from PIL import Image
+    rng = _r.Random(seed)
+    img = Image.new("RGBA", (120, 120))
+    px = img.load()
+    for x in range(120):
+        for y in range(120):
+            g = rng.randint(235, 255)
+            px[x, y] = (g, g, g, 255)
+    path = os.path.join(_tf.gettempdir(), f"imwm_{seed & 0x7FFFFFFF}.png")
+    img.save(path)
+    return path
+
+
+def apply_im_watermark(src: str, dst: str, width: int, height: int,
+                       config, cancel_event, pause_event,
+                       log, seed: int) -> None:
+    """隐式去重水印：让每帧像素不同，防平台逐帧判重。
+
+    - static：直接用 ffmpeg noise 滤镜加全局微噪点（每帧不同，肉眼几乎不可见）
+    - random：小灰度图在画面上跳动（frame=每帧随机 / 2s=每2秒跳）
+    透明度 1%-100% 映射到 noise 强度 / overlay alpha。
+    """
+    opacity = max(0.0001, min(1.0, config.im_wm_opacity))
+    if config.im_wm_motion == "random":
+        # 跳动模式：小灰度图 overlay，alpha 由透明度控制
+        if config.im_wm_source == "custom" and config.im_wm_image and os.path.isfile(config.im_wm_image):
+            wm = config.im_wm_image
+        else:
+            wm = _gen_noise_png(seed)
+        if config.im_wm_density == "frame":
+            x_expr = "random(1)*(W-w)"
+            y_expr = "random(1)*(H-h)"
+        else:
+            # 平滑漂移：位置沿正弦曲线缓慢移动，每2秒左右换方向
+            x_expr = "(W-w)/2 + sin(t*0.7)*(W-w)/2"
+            y_expr = "(H-h)/2 + cos(t*0.9)*(H-h)/2"
+        fc = (
+            f"[1:v]scale=120:-2,format=rgba,colorchannelmixer=aa={opacity:.3f}[wm];"
+            f"[0:v][wm]overlay=x='{x_expr}':y='{y_expr}':shortest=1[v]"
+        )
+        args = [
+            _ffmpeg(), "-y", "-i", src,
+            "-loop", "1", "-i", wm,
+            "-filter_complex", fc,
+            "-map", "[v]", "-map", "0:a?",
+            *_vcodec_args(config.encode_accel, 20),
+            "-c:a", "copy",
+            dst,
+        ]
+    else:
+        # 静止模式：直接 noise 滤镜，强度由透明度映射（1%-100% → alls 1-20）
+        alls = max(1, int(round(opacity * 20)))
+        fc = f"[0:v]noise=alls={alls}:allf=t+u[v]"
+        args = [
+            _ffmpeg(), "-y", "-i", src,
+            "-filter_complex", fc,
+            "-map", "[v]", "-map", "0:a?",
+            *_vcodec_args(config.encode_accel, 20),
+            "-c:a", "copy",
+            dst,
+        ]
+    run_ffmpeg(args, cancel_event, pause_event, log)
+
+
+# 画面滤镜清单：name -> 生成 ffmpeg 滤镜串的 lambda（s = 强度 0-1）
+_FILTER_MAP = {
+    "warm":     lambda s: f"colorbalance=rs={0.3*s:.3f}:gs={0.1*s:.3f}:bs={-0.3*s:.3f}",
+    "cool":     lambda s: f"colorbalance=rs={-0.3*s:.3f}:gs={-0.1*s:.3f}:bs={0.3*s:.3f}",
+    "contrast": lambda s: f"curves=preset=increase_contrast:s={s:.3f}",
+    "desat":    lambda s: f"hue=s={max(0, 1-0.5*s):.3f}",
+    "vintage":  lambda s: f"colorbalance=rs={0.15*s:.3f}:bs={-0.15*s:.3f},curves=medium_contrast",
+    "sharpen":  lambda s: f"unsharp=5:5:{0.8*s:.3f}",
+    "soft":     lambda s: f"boxblur={max(0.1, s):.2f}:{max(0.1, s):.2f}",
+    "vignette": lambda s: f"vignette=PI/{max(1, 5/s):.2f}",
+}
+FILTER_NAMES = list(_FILTER_MAP.keys())
+
+
+def _scan_luts() -> list:
+    """扫描 luts/ 文件夹下所有 .cube 文件。"""
+    lut_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "luts")
+    if not os.path.isdir(lut_dir):
+        return []
+    return [os.path.join(lut_dir, f) for f in os.listdir(lut_dir) if f.lower().endswith(".cube")]
+
+
+def apply_video_filter(src: str, dst: str, config, cancel_event, pause_event, log, seed: int) -> None:
+    """画面滤镜：内置预设 或 LUT 文件调色，让每条成片观感不同。强度 0.1-100。
+
+    filter_mode:
+      - random: 从 luts/ 文件夹随机选一个 .cube
+      - builtin: 用 filter_name 指定的内置预设
+      - custom:  用 filter_name 指定的 .cube 文件路径
+    """
+    import random as _r
+    s = max(0.1, min(100.0, config.filter_strength)) / 100.0
+    fc = None
+    cwd = None
+    import shutil as _sh
+    def _lut_fc(lut_path):
+        nonlocal cwd
+        # ffmpeg lut3d 在 Windows 对中文路径支持差，复制到临时英文名再用
+        import tempfile as _tf
+        tmp = os.path.join(_tf.gettempdir(), f"lut_{abs(hash(lut_path)) & 0xFFFFFF}.cube")
+        try:
+            _sh.copy2(lut_path, tmp)
+        except Exception:
+            return None
+        cwd = os.path.dirname(tmp)
+        return f"lut3d=file={os.path.basename(tmp)}:interp=trilinear"
+    if config.filter_mode == "random":
+        luts = _scan_luts()
+        if luts:
+            lut_path = _r.Random(seed).choice(luts)
+            fc = _lut_fc(lut_path)
+    elif config.filter_mode == "custom" and config.filter_lut_path.lower().endswith(".cube") and os.path.isfile(config.filter_lut_path):
+        fc = _lut_fc(config.filter_lut_path)
+    else:
+        # builtin 模式
+        name = config.filter_name if config.filter_name in _FILTER_MAP else "warm"
+        fc = _FILTER_MAP[name](s)
+    if not fc:
+        # 没有可用 LUT，直接复制
+        args = [_ffmpeg(), "-y", "-i", src, "-c", "copy", dst]
+        run_ffmpeg(args, cancel_event, pause_event, log)
+        return
+    args = [
+        _ffmpeg(), "-y", "-i", src,
+        "-vf", fc,
+        *_vcodec_args(config.encode_accel, 20),
+        "-c:a", "copy",
+        dst,
+    ]
+    run_ffmpeg(args, cancel_event, pause_event, log, cwd=cwd)
+
+
 # 缩略图抽帧限流：素材库几百条缩略图并发请求时，同时最多 3 路 ffmpeg 抽帧
 _THUMB_LIMIT = threading.Semaphore(3)
 
@@ -983,6 +1126,19 @@ class JobConfig:
     watermark_position: str = "右下角"
     watermark_scale: float = 0.15
     watermark_opacity: float = 0.6
+    # 隐式去重水印（去重模块：几乎透明的跳动图案，让每帧像素不同）
+    im_wm_enabled: bool = False
+    im_wm_source: str = "auto"
+    im_wm_image: str = ""
+    im_wm_motion: str = "static"
+    im_wm_density: str = "frame"
+    im_wm_opacity: float = 0.05
+    # 画面滤镜（去重模块：随机或自定义调色，每条成片不同观感）
+    filter_enabled: bool = False
+    filter_mode: str = "random"
+    filter_name: str = "warm"
+    filter_lut_path: str = ""
+    filter_strength: float = 20.0
     workers: int = 2
     encode_accel: str = "auto"
 
@@ -1451,6 +1607,19 @@ def _process_one_combo(
                 encode_accel=config.encode_accel,
             )
             current = subtitled
+
+        if config.filter_enabled:
+            filtered = str(tempdir / "filtered.mp4")
+            _fseed = (config.random_seed & 0x7FFFFFFF) ^ (hash(str(final_path)) & 0x7FFFFFFF)
+            apply_video_filter(current, filtered, config, cancel_event, pause_event, log, _fseed)
+            current = filtered
+
+        if config.im_wm_enabled:
+            im_wmed = str(tempdir / "with_im_wm.mp4")
+            _seed = (config.random_seed & 0x7FFFFFFF) ^ (hash(str(final_path)) & 0x7FFFFFFF)
+            apply_im_watermark(current, im_wmed, width, height, config,
+                               cancel_event, pause_event, log, _seed)
+            current = im_wmed
 
         if config.use_watermark:
             if not config.watermark_path:

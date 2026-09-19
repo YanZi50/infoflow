@@ -19,6 +19,10 @@ const state = reactive({
   similarPairs: [],   // 本次任务输出疑似重复对（感知哈希查重）
   deduping: false,    // 产物查重进行中（异步，后台比对中）
   dedupProgress: null, // 查重进度 {stage, done, total}
+  dedupeOptsClosed: false,  // 折叠：差异化选项
+  imWmOpen: false,          // 折叠：隐式水印（默认收起）
+  versionsClosed: false,    // 折叠：一键多版本
+  filterOpen: false,        // 折叠：画面滤镜
   simPage: 1,         // 疑似重复列表当前页（每页 5 条）
   queue: [],          // 待执行任务队列
   dragQueueIdx: -1,   // 队列拖拽中的索引
@@ -69,6 +73,17 @@ const state = reactive({
     dedupe_level: 'off',
     dedupe_options: { visual: true, segment: true, audio: true, speed: false, mirror: false, noise: false, pitch: false, deep_strength: 'medium' },
     dedupe_versions: 1,
+    im_wm_enabled: false,
+    im_wm_source: 'auto',
+    im_wm_image: '',
+    im_wm_motion: 'static',
+    im_wm_density: 'frame',
+    im_wm_opacity: 5,
+    filter_enabled: false,
+    filter_mode: 'random',
+    filter_name: 'warm',
+    filter_lut_path: '',
+    filter_strength: 20,
     random_seed: 20260905,
     transition_mode: '不使用',
     transition_type: 'fade',
@@ -275,6 +290,16 @@ const snapRows = computed(() => {
   rows.push({ label: 'BGM', value: s.bgm_mode || '不使用' });
   rows.push({ label: '水印', value: s.use_watermark ? (s.watermark_mode || '') + (s.watermark_path ? ' · ' + String(s.watermark_path).split(/[\\/]/).pop() : '') : '关闭' });
   rows.push({ label: '去重', value: s.dedupe_level === 'off' ? '未开启' : ((dedupeLevels.find((l) => l.value === s.dedupe_level) || {}).label || s.dedupe_level) + ` · 版本×${s.dedupe_versions || 1}` + (s.dedupe_level !== 'off' && s.dedupe_options && (s.dedupe_options.speed || s.dedupe_options.mirror || s.dedupe_options.noise || s.dedupe_options.pitch) ? ' · 深度差异化' : '') });
+  rows.push({ label: '画面滤镜', value: s.filter_enabled
+    ? (s.filter_mode === 'random' ? '随机 LUT'
+       : s.filter_mode === 'builtin' ? (s.filter_name || '内置') + ' · 强度' + (s.filter_strength || 20) + '%'
+       : (s.filter_lut_path ? s.filter_lut_path.split(/[\\/]/).pop() : '未选择'))
+    : '关闭' });
+  rows.push({ label: '隐式水印', value: s.im_wm_enabled
+    ? ((s.im_wm_source === 'auto' ? '自动噪点' : '自定义图') + ' · ' +
+       (s.im_wm_motion === 'static' ? '静止铺满' : '随机跳动' + (s.im_wm_density === '2s' ? '(2秒)' : '(每帧)')) +
+       ' · 透明度' + (s.im_wm_opacity || 0) + '%')
+    : '关闭' });
   rows.push({ label: '命名模板', value: s.output_name_template || '-' });
   rows.push({ label: '开头素材', value: s.head_folder || '未选择路径' });
   rows.push({ label: '结尾素材', value: s.tail_folder || '未选择路径' });
@@ -1394,6 +1419,32 @@ async function pickVoiceover() {
 
 /* ---------- 水印选择（服务端文件对话框，直接引用本地文件，不拷贝） ---------- */
 
+async function pickLut(e) {
+  e.preventDefault();
+  try {
+    const data = await api('/api/select_watermark');
+    if (data.busy) { showMsg('已有窗口打开，请先完成当前选择', 'warn'); return; }
+    if (data.path) {
+      state.params.filter_lut_path = data.path;
+      showMsg('LUT 已选择：' + data.path.split(/[\\/]/).pop(), 'success');
+    }
+  } catch (err) {
+    showMsg('选择 LUT 失败：' + err.message, 'error');
+  }
+}
+async function pickImWm(e) {
+  e.preventDefault();
+  try {
+    const data = await api('/api/select_watermark');
+    if (data.busy) { showMsg('已有窗口打开，请先完成当前选择', 'warn'); return; }
+    if (data.path) {
+      state.params.im_wm_image = data.path;
+      showMsg('隐式水印图已选择：' + data.path.split(/[\\/]/).pop(), 'success');
+    }
+  } catch (err) {
+    showMsg('选择失败：' + err.message, 'error');
+  }
+}
 async function pickWatermark(e) {  e.preventDefault();
   try {
     const data = await api('/api/select_watermark');
@@ -1992,6 +2043,20 @@ createApp({
 
     return {
       ...Vue.toRefs(state),
+      dedupeOptsClosed: state.dedupeOptsClosed,
+      imWmOpen: state.imWmOpen,
+      versionsClosed: state.versionsClosed,
+      filterOpen: state.filterOpen,
+      filterList: [
+        { key: 'warm', name: '暖色调', desc: '偏黄偏橙，温暖感' },
+        { key: 'cool', name: '冷色调', desc: '偏蓝偏青，清爽感' },
+        { key: 'contrast', name: '高对比', desc: '明暗更强，更通透' },
+        { key: 'desat', name: '低饱和', desc: '褪色感，高级灰' },
+        { key: 'vintage', name: '复古胶片', desc: '暖黄胶片感' },
+        { key: 'sharpen', name: '锐化', desc: '细节更清晰' },
+        { key: 'soft', name: '柔焦', desc: '轻微模糊，柔和' },
+        { key: 'vignette', name: '暗角', desc: '四周变暗，聚焦中心' }
+      ],
       state, pageTitle, pageDesc,
       toolboxTabs, toolboxTabName, toolboxProgress,
       toolboxGroups, toolboxGuides, currentGuide, tbGroupClick, toggleGuideCollapsed,
@@ -2009,7 +2074,7 @@ createApp({
       toggleTheme, toggleChip, randomizeSeed, shutdownApp,
       downloadUpdate,
       selectAllTransitions, clearTransitions, setTransitionDuration,
-      selectFolder, pickWatermark, pickVoiceover,
+      selectFolder, pickLut, pickImWm, pickWatermark, pickVoiceover,
       scan, toggleFixed, fileName, shortError, fmtEta, makeDownloadUrl,
       toolboxSelect, toolboxRun, toolboxCancel, toolboxClear, toolboxOpenOut,
       asrRun, asrCancel, asrClear, asrSelectFolder, asrProgress, asrStats, asrDurationText, asrModelText, asrDlPercent, asrDlText, asrSelectExportDir, asrExportSrt,

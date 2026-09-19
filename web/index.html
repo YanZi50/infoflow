@@ -658,10 +658,13 @@
               </div>
             </div>
 
-            <div class="card">
-              <div class="card-title"><span class="bar"></span>差异化维度
-                <span class="card-hint" style="margin-left:8px">可多选 · 关闭差异化时不可用</span>
-              </div>
+            <div class="accordion" :class="{open: !dedupeOptsClosed}">
+            <div class="accordion-head" @click="dedupeOptsClosed=!dedupeOptsClosed">
+              <span class="accordion-title">差异化选项</span>
+              <span class="accordion-arrow">▾</span>
+            </div>
+            <div class="accordion-body">
+              <div style="font-size:12px;color:var(--tx2);margin:0 0 10px">基础扰动 · 轻微调整，观感几乎不变</div>
               <div class="dl-opts">
                 <label v-for="o in dedupeOptions" :key="o.key" class="dl-opt"
                        :class="{on: params.dedupe_options[o.key], disabled: params.dedupe_level==='off'}">
@@ -672,12 +675,7 @@
                   </span>
                 </label>
               </div>
-            </div>
-
-            <div class="card" :class="{disabled: params.dedupe_level==='off'}">
-              <div class="card-title"><span class="bar"></span>深度差异化
-                <span class="card-hint" style="margin-left:8px">更强扰动 · 平台判重严重时开启 · 建议搭配镜像/噪点使用</span>
-              </div>
+              <div style="font-size:12px;color:var(--tx2);margin:16px 0 10px">深度扰动 · 平台判重严重时开启</div>
               <div class="dl-opts">
                 <label v-for="o in deepDedupeOptions" :key="o.key" class="dl-opt"
                        :class="{on: params.dedupe_options[o.key], disabled: params.dedupe_level==='off'}">
@@ -688,7 +686,7 @@
                   </span>
                 </label>
               </div>
-              <div class="dl-strength" :class="{disabled: params.dedupe_level==='off'}">
+              <div class="dl-strength" :class="{disabled: params.dedupe_level==='off'}" style="margin-top:14px">
                 <span class="dl-strength-label">深度扰动强度</span>
                 <div class="seg" style="flex:1">
                   <button v-for="s in deepStrengths" :key="s.value" :class="{on: params.dedupe_options.deep_strength===s.value}"
@@ -698,20 +696,138 @@
                 <span class="dl-strength-hint">{{ (deepStrengths.find((s) => s.value === params.dedupe_options.deep_strength) || {}).hint }}</span>
               </div>
             </div>
+          </div>
 
-            <div class="card">
-              <div class="card-title"><span class="bar"></span>一键多版本</div>
-              <div class="dl-versions">
-                <div class="range-wrap">
-                  <input type="range" min="1" max="5" step="1" v-model.number="params.dedupe_versions">
-                  <span class="dl-ver-num">{{ params.dedupe_versions }} 版</span>
+          <div class="accordion" :class="{open: imWmOpen}">
+            <div class="accordion-head" @click="imWmOpen=!imWmOpen">
+              <span class="accordion-title">隐式去重水印</span>
+              <span v-if="params.im_wm_enabled" class="accordion-badge">已开启</span>
+              <span class="accordion-arrow">▾</span>
+            </div>
+            <div v-show="imWmOpen" class="accordion-body">
+              <div class="field">
+                <label class="switch">
+                  <input type="checkbox" v-model="params.im_wm_enabled"><span class="track"></span>
+                  <span class="switch-label">启用隐式去重水印</span>
+                </label>
+                <div style="font-size:12px;color:var(--tx2);margin-left:52px;margin-top:-4px">几乎透明的跳动图案，让每帧像素不同，防平台逐帧判重</div>
+              </div>
+              <div v-if="params.im_wm_enabled">
+                <div class="field">
+                  <div class="field-label">图案来源</div>
+                  <div class="seg">
+                    <button :class="{on: params.im_wm_source==='auto'}" @click="params.im_wm_source='auto'">自动生成</button>
+                    <button :class="{on: params.im_wm_source==='custom'}" @click="params.im_wm_source='custom'">自定义图片</button>
+                  </div>
                 </div>
-                <div class="card-hint" style="margin-top:8px">
-                  出片 {{ params.count }} 条 × {{ params.dedupe_versions }} 版 = 实际生成
-                  <b class="dl-total">{{ params.count * params.dedupe_versions }}</b> 条，各版本差异化参数不同，投放素材互不重复。
+                <div v-if="params.im_wm_source==='custom'" class="field">
+                  <div class="field-label">水印图片</div>
+                  <div class="folder-row">
+                    <input class="input input-path" v-model="params.im_wm_image" placeholder="PNG/JPG/GIF 路径">
+                    <button class="btn soft" @click="pickImWm">选择文件</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <div class="field-label">运动模式</div>
+                  <div class="seg">
+                    <button :class="{on: params.im_wm_motion==='static'}" @click="params.im_wm_motion='static'">静止铺满</button>
+                    <button :class="{on: params.im_wm_motion==='random'}" @click="params.im_wm_motion='random'">随机跳动</button>
+                  </div>
+                </div>
+                <div v-if="params.im_wm_motion==='random'" class="field">
+                  <div class="field-label">跳动密度</div>
+                  <div class="seg">
+                    <button :class="{on: params.im_wm_density==='frame'}" @click="params.im_wm_density='frame'">每帧随机</button>
+                    <button :class="{on: params.im_wm_density==='2s'}" @click="params.im_wm_density='2s'">每2秒跳</button>
+                  </div>
+                  <div style="color:var(--tx2);font-size:12px;margin-top:4px">每帧去重最强（可能轻微闪）；每2秒完全无感</div>
+                </div>
+                <div class="field">
+                  <div class="field-label">透明度（越低越隐形，建议 2%-5%）</div>
+                  <div class="range-wrap">
+                    <input type="range" min="0.01" max="10" step="0.01" v-model.number="params.im_wm_opacity">
+                    <span class="range-val">{{ params.im_wm_opacity }}%</span>
+                  </div>
                 </div>
               </div>
             </div>
+          </div>
+
+          <div class="accordion" :class="{open: filterOpen}">
+            <div class="accordion-head" @click="filterOpen=!filterOpen">
+              <span class="accordion-title">画面滤镜</span>
+              <span v-if="params.filter_enabled" class="accordion-badge">已开启</span>
+              <span class="accordion-arrow">▾</span>
+            </div>
+            <div v-show="filterOpen" class="accordion-body">
+              <div class="field">
+                <label class="switch">
+                  <input type="checkbox" v-model="params.filter_enabled"><span class="track"></span>
+                  <span class="switch-label">启用画面滤镜</span>
+                </label>
+                <div style="font-size:12px;color:var(--tx2);margin-left:52px;margin-top:-4px">每条成片自动调色，让平台看不出是同一素材</div>
+              </div>
+              <div v-if="params.filter_enabled">
+                <div class="field">
+                  <div class="field-label">模式</div>
+                  <div class="seg">
+                    <button :class="{on: params.filter_mode==='random'}" @click="params.filter_mode='random'">随机 LUT</button>
+                    <button :class="{on: params.filter_mode==='builtin'}" @click="params.filter_mode='builtin'">内置预设</button>
+                    <button :class="{on: params.filter_mode==='custom'}" @click="params.filter_mode='custom'">自定义 LUT</button>
+                  </div>
+                </div>
+                <div v-if="params.filter_mode==='random'" class="field">
+                  <div style="font-size:13px;color:var(--tx2);line-height:1.6;padding:8px 0">
+                    自动从项目 <code style="background:var(--bg2);padding:2px 6px;border-radius:4px">luts/</code> 文件夹随机选 .cube 文件。<br>
+                    你往 <code style="background:var(--bg2);padding:2px 6px;border-radius:4px">luts/</code> 里放越多 LUT，每条成片观感越丰富。
+                  </div>
+                </div>
+                <div v-if="params.filter_mode==='builtin'" class="field">
+                  <div class="field-label">选择预设</div>
+                  <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">
+                    <button v-for="f in filterList" :key="f.key"
+                            :class="{on: params.filter_name===f.key}"
+                            @click="params.filter_name=f.key"
+                            style="padding:10px 6px;border:1.5px solid var(--line);border-radius:10px;background:var(--bg-soft);cursor:pointer;text-align:center;transition:all .15s">
+                      <div style="font-size:13px;font-weight:600">{{ f.name }}</div>
+                      <div style="font-size:11px;color:var(--tx2);margin-top:2px">{{ f.desc }}</div>
+                    </button>
+                  </div>
+                </div>
+                <div v-if="params.filter_mode==='custom'" class="field">
+                  <div class="field-label">LUT 文件（.cube）</div>
+                  <div class="folder-row">
+                    <input class="input input-path" v-model="params.filter_lut_path" placeholder="选择 .cube LUT 文件">
+                    <button class="btn soft" @click="pickLut">选择文件</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <div class="field-label">强度（越低越自然）</div>
+                  <div class="range-wrap">
+                    <input type="range" min="0.1" max="100" step="0.1" v-model.number="params.filter_strength">
+                    <span class="range-val">{{ params.filter_strength }}%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="accordion" :class="{open: !versionsClosed}">
+            <div class="accordion-head" @click="versionsClosed=!versionsClosed">
+              <span class="accordion-title">一键多版本</span>
+              <span class="accordion-arrow">▾</span>
+            </div>
+            <div v-show="!versionsClosed" class="accordion-body">
+              <div class="range-wrap">
+                <input type="range" min="1" max="5" step="1" v-model.number="params.dedupe_versions">
+                <span class="dl-ver-num">{{ params.dedupe_versions }} 版</span>
+              </div>
+              <div class="card-hint" style="margin-top:10px;line-height:1.6">
+                <b>什么是多版本？</b> 同一批素材出 N 条"看起来不同"的视频：每条自动做变速/镜像/噪点/入点偏移，平台逐帧判重认不出，适合矩阵投放。<br>
+                出片 {{ params.count }} 条 × {{ params.dedupe_versions }} 版 = 实际生成 <b class="dl-total">{{ params.count * params.dedupe_versions }}</b> 条。
+              </div>
+            </div>
+          </div>
           </section>
 
           <!-- ================= 步骤 4：生成 ================= -->
@@ -782,7 +898,7 @@
                   <div class="snap-grid">
                     <div v-for="r in snapRows" :key="r.label" class="snap-row">
                       <span class="snap-label">{{ r.label }}</span>
-                      <span class="snap-value">{{ r.value }}</span>
+                      <span class="snap-value" :title="r.value">{{ r.value }}</span>
                     </div>
                   </div>
                 </div>
@@ -1663,6 +1779,6 @@
   <script src="/options.js?v=tbv2"></script>
   <script src="/util.js?v=tbv2"></script>
   <script src="/api.js?v=tbv2"></script>
-  <script src="/app.js?v=tbv2"></script>
+  <script src="/app.js?v=filter1"></script>
 </body>
 </html>

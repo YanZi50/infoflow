@@ -793,7 +793,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
   accent-color: var(--success); cursor: pointer;
 }
 .dl-opt.disabled .dl-check { cursor: not-allowed; }
-.dl-opt-main { display: flex; flex-direction: column; gap: 4px; }
+.dl-opt-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.dl-opt-name { white-space: nowrap; }
 .dl-opt-name { font-size: 14px; font-weight: 700; color: var(--text); }
 .dl-opt.on .dl-opt-name { color: var(--success); }
 .dl-opt-desc { font-size: 11.5px; line-height: 1.6; color: var(--text-3); }
@@ -1037,3 +1038,20 @@ textarea.input { resize: vertical; min-height: 100px; }
 .tb-guide-warn { color: #d4943a !important; }
 .field-q { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; margin-left: 6px; border-radius: 50%; background: var(--bg-soft); color: var(--text-3); font-size: 11px; cursor: help; border: 1px solid var(--line); }
 .field-q:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* ===== 折叠手风琴（去重页） ===== */
+.accordion { background: var(--card, #fff); border: 1px solid var(--border, #e5e7eb); border-radius: 12px; margin-bottom: 12px; overflow: hidden; }
+.accordion-head { display: flex; align-items: center; padding: 14px 16px; cursor: pointer; user-select: none; transition: background .15s; }
+.accordion-head:hover { background: var(--bg2, #f8f9fc); }
+.accordion-title { font-weight: 600; font-size: 14px; flex: 1; }
+.accordion-badge { font-size: 11px; color: var(--ok, #16a34a); background: var(--ok-soft, #dcfce7); padding: 2px 8px; border-radius: 10px; margin-right: 8px; font-weight: 500; }
+.accordion-arrow { transition: transform .2s; color: var(--tx2, #6b7280); font-size: 12px; }
+.accordion.open .accordion-arrow { transform: rotate(180deg); }
+.accordion-body { padding: 16px; border-top: 1px solid var(--border, #e5e7eb); }
+
+/* 滤镜预设卡片选中态 */
+button[style*="repeat(2,1fr)"] button.on,
+.accordion-body button.on {
+  border-color: var(--primary, #3b82f6) !important;
+  background: var(--primary-soft, #dbeafe) !important;
+}
